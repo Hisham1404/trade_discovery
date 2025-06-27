@@ -1,0 +1,212 @@
+groups:
+  - name: infrastructure_alerts
+    rules:
+      # Service availability alerts
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service {{ $labels.instance }} is down"
+          description: "Service {{ $labels.instance }} has been down for more than 1 minute."
+
+      # PostgreSQL alerts
+      - alert: PostgreSQLDown
+        expr: pg_up == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL is down"
+          description: "PostgreSQL database is not responding."
+
+      - alert: PostgreSQLTooManyConnections
+        expr: sum by (instance) (pg_stat_activity_count) > 80
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PostgreSQL has too many connections"
+          description: "PostgreSQL instance {{ $labels.instance }} has {{ $value }} connections (> 80)."
+
+      - alert: PostgreSQLHighCPU
+        expr: rate(pg_stat_bgwriter_checkpoint_write_time[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PostgreSQL high CPU usage"
+          description: "PostgreSQL is experiencing high CPU usage."
+
+      # Redis alerts
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis is down"
+          description: "Redis instance is not responding."
+
+      - alert: RedisHighMemoryUsage
+        expr: redis_memory_used_bytes / redis_memory_max_bytes * 100 > 90
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis high memory usage"
+          description: "Redis instance is using {{ $value }}% of its memory."
+
+      - alert: RedisHighConnections
+        expr: redis_connected_clients > 100
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis has too many connections"
+          description: "Redis instance has {{ $value }} connections (> 100)."
+
+      # Pulsar alerts
+      - alert: PulsarDown
+        expr: up{job="pulsar"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Apache Pulsar is down"
+          description: "Pulsar service is not responding."
+
+      - alert: PulsarHighMessageBacklog
+        expr: pulsar_subscription_back_log > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pulsar high message backlog"
+          description: "Pulsar subscription has {{ $value }} messages in backlog."
+
+      # Elasticsearch alerts
+      - alert: ElasticsearchDown
+        expr: elasticsearch_cluster_health_up != 1
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Elasticsearch is down"
+          description: "Elasticsearch cluster is not healthy."
+
+      - alert: ElasticsearchDiskSpaceHigh
+        expr: elasticsearch_filesystem_data_available_bytes / elasticsearch_filesystem_data_size_bytes * 100 < 10
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Elasticsearch low disk space"
+          description: "Elasticsearch node has only {{ $value }}% disk space available."
+
+      # Qdrant alerts
+      - alert: QdrantDown
+        expr: up{job="qdrant"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Qdrant vector database is down"
+          description: "Qdrant service is not responding."
+
+      # MinIO alerts
+      - alert: MinIODown
+        expr: up{job="minio"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "MinIO object storage is down"
+          description: "MinIO service is not responding."
+
+      - alert: MinIOHighDiskUsage
+        expr: minio_cluster_disk_total_bytes - minio_cluster_disk_free_bytes > minio_cluster_disk_total_bytes * 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MinIO high disk usage"
+          description: "MinIO cluster is using more than 90% of disk space."
+
+      # System resource alerts
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage"
+          description: "Memory usage is above 90% on {{ $labels.instance }}."
+
+      - alert: HighDiskUsage
+        expr: (1 - node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High disk usage"
+          description: "Disk usage is above 85% on {{ $labels.instance }}."
+
+      # Container alerts
+      - alert: ContainerKilled
+        expr: time() - container_last_seen > 60
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container killed"
+          description: "A container has disappeared for more than 1 minute."
+
+      - alert: ContainerCpuUsage
+        expr: (sum(rate(container_cpu_usage_seconds_total[3m])) BY (instance, name) * 100) > 80
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container CPU usage"
+          description: "Container CPU usage is above 80% for {{ $labels.name }}."
+
+      - alert: ContainerMemoryUsage
+        expr: (sum(container_memory_working_set_bytes) BY (instance, name) / sum(container_spec_memory_limit_bytes > 0) BY (instance, name) * 100) > 80
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container Memory usage"
+          description: "Container Memory usage is above 80% for {{ $labels.name }}."
+
+  - name: trading_specific_alerts
+    rules:
+      # Trading signal alerts (for future implementation)
+      - alert: LowSignalGeneration
+        expr: rate(trading_signals_generated_total[5m]) < 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low signal generation rate"
+          description: "Signal generation rate is below 0.1 signals/second for 5 minutes."
+
+      - alert: HighSignalErrorRate
+        expr: rate(trading_signal_errors_total[5m]) / rate(trading_signals_generated_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High signal error rate"
+          description: "Signal error rate is above 10% for 2 minutes."
+
+      - alert: AgentPerformanceDegraded
+        expr: avg_over_time(agent_accuracy_ratio[1h]) < 0.6
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Agent performance degraded"
+          description: "Agent {{ $labels.agent_id }} accuracy is below 60% for the last hour." 
