@@ -1,20 +1,229 @@
 """
 User authentication models and database models.
-Includes Pydantic models for API validation and database models for data persistence.
+Includes Pydantic models for API validation and SQLAlchemy ORM models for data persistence.
 """
 
 import re
 import secrets
 from datetime import datetime, timedelta
 from typing import Optional, List
-from pydantic import BaseModel, EmailStr, Field, validator
+from uuid import uuid4
+from sqlalchemy import String, Boolean, DateTime, Text, func
+from sqlalchemy.dialects.postgresql import UUID, ARRAY
+from sqlalchemy.orm import Mapped, mapped_column
+from pydantic import BaseModel, EmailStr, Field, field_validator, ConfigDict
 from passlib.context import CryptContext
 
+from app.core.database import Base
 from app.core.security import hash_password
 
 # Password hashing configuration
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+
+# SQLAlchemy ORM Model
+class User(Base):
+    """SQLAlchemy ORM model for User entity with TimescaleDB support."""
+    
+    __tablename__ = "users"
+    
+    # Primary key using UUID
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), 
+        primary_key=True, 
+        default=lambda: str(uuid4()),
+        comment="Unique user identifier"
+    )
+    
+    # Authentication fields
+    email: Mapped[str] = mapped_column(
+        String(255), 
+        unique=True, 
+        nullable=False,
+        index=True,
+        comment="User email address"
+    )
+    phone: Mapped[str] = mapped_column(
+        String(20), 
+        unique=True, 
+        nullable=False,
+        index=True,
+        comment="Indian phone number with country code"
+    )
+    password_hash: Mapped[str] = mapped_column(
+        String(255), 
+        nullable=False,
+        comment="Bcrypt hashed password"
+    )
+    
+    # Profile information
+    full_name: Mapped[str] = mapped_column(
+        String(100), 
+        nullable=False,
+        comment="User full name"
+    )
+    
+    # Account status
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, 
+        default=True, 
+        nullable=False,
+        comment="Whether user account is active"
+    )
+    is_verified: Mapped[bool] = mapped_column(
+        Boolean, 
+        default=False, 
+        nullable=False,
+        comment="Whether user has verified email/phone"
+    )
+    
+    # Verification fields
+    verification_code: Mapped[Optional[str]] = mapped_column(
+        String(6), 
+        nullable=True,
+        comment="6-digit verification code"
+    )
+    verification_code_expires: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), 
+        nullable=True,
+        comment="Verification code expiration time"
+    )
+    
+    # 2FA fields
+    totp_secret: Mapped[Optional[str]] = mapped_column(
+        String(32), 
+        nullable=True,
+        comment="TOTP secret for 2FA"
+    )
+    is_2fa_enabled: Mapped[bool] = mapped_column(
+        Boolean, 
+        default=False, 
+        nullable=False,
+        comment="Whether 2FA is enabled"
+    )
+    backup_codes: Mapped[Optional[List[str]]] = mapped_column(
+        ARRAY(String), 
+        nullable=True, 
+        default=list,
+        comment="2FA backup codes"
+    )
+    
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), 
+        server_default=func.now(), 
+        nullable=False,
+        comment="Account creation timestamp"
+    )
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), 
+        onupdate=func.now(), 
+        nullable=True,
+        comment="Last update timestamp"
+    )
+    last_login: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), 
+        nullable=True,
+        comment="Last login timestamp"
+    )
+    
+    def set_password(self, password: str) -> None:
+        """Hash and set user password."""
+        self.password_hash = pwd_context.hash(password)
+
+    def verify_password(self, password: str) -> bool:
+        """Verify a password against the hashed password."""
+        return pwd_context.verify(password, self.password_hash)
+
+    def generate_verification_code(self) -> str:
+        """Generate a 6-digit verification code."""
+        code = str(secrets.randbelow(1000000)).zfill(6)
+        self.verification_code = code
+        self.verification_code_expires = datetime.now() + timedelta(minutes=15)
+        return code
+
+    def verify_code(self, code: str) -> bool:
+        """Verify the provided code against stored code."""
+        if not self.verification_code or not code:
+            return False
+        
+        # Check if code has expired
+        if self.verification_code_expires and datetime.now() > self.verification_code_expires:
+            return False
+        
+        return self.verification_code == code
+
+    def mark_as_verified(self) -> None:
+        """Mark user as verified and clear verification code."""
+        self.is_verified = True
+        self.verification_code = None
+        self.verification_code_expires = None
+        self.updated_at = datetime.now()
+
+    def update_last_login(self) -> None:
+        """Update last login timestamp."""
+        self.last_login = datetime.now()
+        self.updated_at = datetime.now()
+
+    def enable_2fa(self, totp_secret: str, backup_codes: List[str]) -> None:
+        """Enable 2FA with TOTP secret and backup codes."""
+        self.totp_secret = totp_secret
+        self.backup_codes = backup_codes.copy()
+        self.is_2fa_enabled = True
+
+    def disable_2fa(self) -> None:
+        """Disable 2FA and clear related data."""
+        self.totp_secret = None
+        self.backup_codes = []
+        self.is_2fa_enabled = False
+
+    def use_backup_code(self, code: str) -> bool:
+        """Use a backup code (removes it from the list if valid)."""
+        if self.backup_codes and code.upper() in self.backup_codes:
+            self.backup_codes.remove(code.upper())
+            return True
+        return False
+
+    def regenerate_backup_codes(self, new_codes: List[str]) -> None:
+        """Replace all backup codes with new ones."""
+        self.backup_codes = new_codes.copy()
+
+    @property
+    def backup_codes_count(self) -> int:
+        """Get the number of remaining backup codes."""
+        return len(self.backup_codes) if self.backup_codes else 0
+
+    @property
+    def verification_expires_at(self) -> Optional[datetime]:
+        """Alias for verification_code_expires to maintain backward compatibility."""
+        return self.verification_code_expires
+
+    @verification_expires_at.setter
+    def verification_expires_at(self, value: Optional[datetime]) -> None:
+        """Setter for verification_expires_at alias."""
+        self.verification_code_expires = value
+
+    def to_dict(self) -> dict:
+        """Convert User instance to dictionary for API responses."""
+        return {
+            "id": self.id or str(uuid4()),  # Generate UUID if None
+            "email": self.email,
+            "phone": self.phone,
+            "full_name": self.full_name,
+            "is_active": self.is_active if self.is_active is not None else True,
+            "is_verified": self.is_verified if self.is_verified is not None else False,
+            "created_at": self.created_at or datetime.now(),
+            "updated_at": self.updated_at,
+            "last_login": self.last_login,
+            "is_2fa_enabled": self.is_2fa_enabled if self.is_2fa_enabled is not None else False,
+            "backup_codes_count": self.backup_codes_count
+        }
+
+    def __repr__(self) -> str:
+        return f"<User(id={self.id}, email='{self.email}', phone='{self.phone}')>"
+
+
+# Pydantic Models for API Validation
 
 class UserCreate(BaseModel):
     """Pydantic model for user registration data validation."""
@@ -23,7 +232,8 @@ class UserCreate(BaseModel):
     password: str = Field(..., min_length=8, description="User password")
     full_name: str = Field(..., min_length=2, max_length=100, description="User full name")
 
-    @validator('phone')
+    @field_validator('phone')
+    @classmethod
     def validate_indian_phone(cls, v):
         """Validate Indian phone number format"""
         if not v:
@@ -36,7 +246,8 @@ class UserCreate(BaseModel):
         
         return v
 
-    @validator('password')
+    @field_validator('password')
+    @classmethod
     def validate_password_strength(cls, v):
         """Validate password strength requirements"""
         if len(v) < 8:
@@ -60,7 +271,8 @@ class UserCreate(BaseModel):
         
         return v
 
-    @validator('full_name')
+    @field_validator('full_name')
+    @classmethod
     def validate_full_name(cls, v):
         """Validate full name format"""
         if not v or not v.strip():
@@ -78,7 +290,9 @@ class UserCreate(BaseModel):
 
 class UserResponse(BaseModel):
     """Pydantic model for user data in API responses."""
-    id: int
+    model_config = ConfigDict(from_attributes=True)
+    
+    id: str
     email: str
     phone: str
     full_name: str
@@ -90,16 +304,14 @@ class UserResponse(BaseModel):
     is_2fa_enabled: bool
     backup_codes_count: int
 
-    class Config:
-        from_attributes = True
-
 
 class UserLogin(BaseModel):
     """Pydantic model for user login data."""
     identifier: str = Field(..., description="Email address or phone number")
     password: str = Field(..., description="User password")
 
-    @validator('identifier')
+    @field_validator('identifier')
+    @classmethod
     def validate_identifier(cls, v):
         """Validate that identifier is either email or phone"""
         if not v:
@@ -124,14 +336,16 @@ class UserVerification(BaseModel):
     verification_code: str = Field(..., min_length=6, max_length=6, description="6-digit verification code")
     verification_type: str = Field(..., description="Type of verification: email or sms")
 
-    @validator('verification_code')
+    @field_validator('verification_code')
+    @classmethod
     def validate_verification_code(cls, v):
         """Validate verification code format"""
         if not v.isdigit():
             raise ValueError('Verification code must be 6 digits')
         return v
 
-    @validator('verification_type')
+    @field_validator('verification_type')
+    @classmethod
     def validate_verification_type(cls, v):
         """Validate verification type"""
         if v not in ['email', 'sms']:
@@ -144,172 +358,13 @@ class ResendVerification(BaseModel):
     identifier: str = Field(..., description="Email address or phone number")
     verification_type: str = Field(..., description="Type of verification: email or sms")
 
-    @validator('verification_type')
+    @field_validator('verification_type')
+    @classmethod
     def validate_verification_type(cls, v):
         """Validate verification type"""
         if v not in ['email', 'sms']:
             raise ValueError('Verification type must be either "email" or "sms"')
         return v
-
-
-class User:
-    """Database model for User entity."""
-    
-    _id_counter = 1  # class level counter for tests without explicit id
-
-    def __init__(
-        self,
-        email: str,
-        phone: str,
-        full_name: str,
-        password: str | None = None,
-        user_id: Optional[int] = None,
-        hashed_password: Optional[str] = None,
-        verification_code: Optional[str] = None,
-        verification_code_expires: Optional[datetime] = None,
-        is_verified: bool = False,
-        created_at: Optional[datetime] = None,
-        totp_secret: Optional[str] = None,
-        is_2fa_enabled: bool = False,
-        backup_codes: Optional[List[str]] = None
-    ):
-        # Auto assign id if not provided (used heavily in tests)
-        if user_id is None:
-            user_id = User._id_counter
-            User._id_counter += 1
-        self.user_id = user_id
-
-        self.email = email
-        self.phone = phone
-        self.full_name = full_name
-        self.hashed_password = hashed_password or ""
-        self.verification_code = verification_code
-        self.verification_code_expires = verification_code_expires
-        self.is_verified = is_verified
-        self.created_at = created_at or datetime.now()
-        self.updated_at: Optional[datetime] = None
-        self.last_login: Optional[datetime] = None
-        self.totp_secret = totp_secret
-        self.is_2fa_enabled = is_2fa_enabled
-        self.backup_codes = backup_codes or []
-
-        # If a plain password is provided, hash it automatically (for legacy tests)
-        if password is not None:
-            self.set_password(password)
-
-    def set_password(self, password: str) -> None:
-        """Hash and set user password"""
-        self.hashed_password = pwd_context.hash(password)
-
-    def verify_password(self, password: str) -> bool:
-        """Verify a password against the hashed password."""
-        return pwd_context.verify(password, self.hashed_password)
-
-    def generate_verification_code(self) -> str:
-        """Generate a 6-digit verification code"""
-        code = str(secrets.randbelow(1000000)).zfill(6)
-        self.verification_code = code
-        self.verification_code_expires = datetime.now() + timedelta(minutes=15)
-        return code
-
-    def verify_code(self, code: str) -> bool:
-        """Verify the provided code against stored code"""
-        if not self.verification_code or not code:
-            return False
-        
-        # Check if code has expired
-        if self.verification_code_expires and datetime.now() > self.verification_code_expires:
-            return False
-        
-        return self.verification_code == code
-
-    def mark_as_verified(self) -> None:
-        """Mark user as verified and clear verification code"""
-        self.is_verified = True
-        self.verification_code = None
-        self.verification_code_expires = None
-        self.updated_at = datetime.now()
-
-    def update_last_login(self) -> None:
-        """Update last login timestamp"""
-        self.last_login = datetime.now()
-        self.updated_at = datetime.now()
-
-    def to_dict(self) -> dict:
-        """Convert user object to dictionary for API responses"""
-        return {
-            "id": self.user_id,
-            "email": self.email,
-            "phone": self.phone,
-            "full_name": self.full_name,
-            "is_active": True,
-            "is_verified": self.is_verified,
-            "created_at": self.created_at,
-            "updated_at": self.updated_at,
-            "last_login": self.last_login,
-            "is_2fa_enabled": self.is_2fa_enabled,
-            "backup_codes_count": len(self.backup_codes) if self.backup_codes else 0
-        }
-
-    def __repr__(self) -> str:
-        return f"<User(user_id={self.user_id}, email='{self.email}', phone='{self.phone}')>"
-
-    def enable_2fa(self, totp_secret: str, backup_codes: List[str]) -> None:
-        """Enable 2FA with TOTP secret and backup codes."""
-        self.totp_secret = totp_secret
-        self.backup_codes = backup_codes.copy()
-        self.is_2fa_enabled = True
-
-    def disable_2fa(self) -> None:
-        """Disable 2FA and clear related data."""
-        self.totp_secret = None
-        self.backup_codes = []
-        self.is_2fa_enabled = False
-
-    def use_backup_code(self, code: str) -> bool:
-        """Use a backup code (removes it from the list if valid)."""
-        if code.upper() in self.backup_codes:
-            self.backup_codes.remove(code.upper())
-            return True
-        return False
-
-    def regenerate_backup_codes(self, new_codes: List[str]) -> None:
-        """Replace all backup codes with new ones."""
-        self.backup_codes = new_codes.copy()
-
-    # ------- Backward-compat aliases expected by old tests ---------
-
-    @property
-    def id(self):  # noqa: D401
-        return self.user_id
-
-    @property
-    def password_hash(self):
-        return self.hashed_password
-    
-    @password_hash.setter 
-    def password_hash(self, value: str):
-        """Allow setting password_hash directly for backward compatibility"""
-        # Store the value directly without re-hashing if it's already hashed
-        if value and (value.startswith('$2b$') or len(value) == 60):
-            # Already hashed password
-            self.hashed_password = value
-        else:
-            # Plain password - hash it
-            self.hashed_password = pwd_context.hash(value) if value else ""
-
-    @property
-    def verification_expires_at(self):
-        return self.verification_code_expires
-    
-    @verification_expires_at.setter
-    def verification_expires_at(self, value):
-        """Allow setting verification_expires_at for backward compatibility"""
-        self.verification_code_expires = value
-
-    @property
-    def is_active(self):  # legacy attribute always True
-        return True
 
 
 # 2FA Related Schemas
@@ -325,7 +380,8 @@ class TwoFactorVerifySetup(BaseModel):
     """Schema for verifying 2FA setup."""
     totp_code: str
     
-    @validator('totp_code')
+    @field_validator('totp_code')
+    @classmethod
     def validate_totp_code(cls, v):
         """Validate TOTP code format."""
         if not v or len(v) != 6 or not v.isdigit():
@@ -338,7 +394,8 @@ class TwoFactorAuthenticate(BaseModel):
     temp_token: str
     totp_code: str
     
-    @validator('totp_code')
+    @field_validator('totp_code')
+    @classmethod
     def validate_totp_code(cls, v):
         """Validate TOTP code format."""
         if not v or len(v) != 6 or not v.isdigit():

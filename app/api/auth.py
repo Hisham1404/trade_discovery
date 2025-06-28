@@ -76,13 +76,25 @@ async def register_user(user_data: UserCreate, request: Request):
     
     # Create new user
     user = User(
-        user_id=user_id_counter,
         email=user_data.email,
         phone=user_data.phone,
-        full_name=user_data.full_name,
-        hashed_password=""  # Will be set by set_password
+        full_name=user_data.full_name
     )
+    # Initialize default values explicitly for in-memory testing
+    user.is_active = True
+    user.is_verified = False
+    user.is_2fa_enabled = False
+    user.backup_codes = []
+    
+    # Assign incremental user_id attribute for in-memory references (not persisted)
+    # This maintains compatibility with existing tests that expect user_id to be a
+    # simple integer while allowing the underlying database model to use a UUID
+    user.user_id = user_id_counter  # type: ignore[attr-defined]
+    
     user.set_password(user_data.password)
+    
+    # Ensure timestamps for in-memory instance (not persisted yet)
+    user.created_at = datetime.utcnow()  # type: ignore[assignment]
     
     # Generate verification code
     verification_code = user.generate_verification_code()

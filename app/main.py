@@ -65,10 +65,18 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_HOSTS,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001", 
+        "https://tradediscovery.app",
+        "http://localhost",
+        "http://localhost:8080"
+    ] + settings.ALLOWED_HOSTS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["X-Process-Time", "X-Request-ID"],
+    max_age=600
 )
 
 
@@ -102,6 +110,18 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 # Include routers
 app.include_router(auth_router, prefix="/auth", tags=["authentication"])
+
+# Import and include signals router
+from app.api.signals import router as signals_router
+app.include_router(signals_router, prefix="/api", tags=["signals"])
+
+# Import and include alerts router
+from app.api.alerts import router as alerts_router
+app.include_router(alerts_router, prefix="/api", tags=["alerts"])
+
+# Import and include WebSocket router
+from app.api.websockets import router as websocket_router
+app.include_router(websocket_router, prefix="/ws", tags=["websockets"])
 
 
 @app.get("/")

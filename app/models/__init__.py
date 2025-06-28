@@ -1,9 +1,18 @@
 """
-Pydantic models and database models for the Discovery Cluster API.
+Database models package.
+Exports all SQLAlchemy ORM models and the Base class.
+"""
 
-This module contains:
-- User authentication models
-- Trading signal models  
-- Request/Response models
-- Database ORM models
-""" 
+from app.core.database import Base
+
+# Import all models to register them with SQLAlchemy
+from .user import User
+from .signal import Signal, MarketTick, AgentPerformance
+
+__all__ = [
+    "Base",
+    "User", 
+    "Signal",
+    "MarketTick",
+    "AgentPerformance",
+] 

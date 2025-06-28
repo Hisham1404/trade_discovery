@@ -6,13 +6,19 @@ Handles environment variables and application configuration.
 import os
 from typing import Optional
 from pydantic import Field
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """
     Application settings loaded from environment variables.
     """
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8", 
+        case_sensitive=True,
+        extra="ignore"  # Ignore extra environment variables
+    )
     
     # Application Settings
     APP_NAME: str = Field(default="Discovery Cluster API", description="Application name")
@@ -46,17 +52,14 @@ class Settings(BaseSettings):
     REDIS_PASSWORD: Optional[str] = Field(default=None, description="Redis password")
     REDIS_DB: int = Field(default=0, description="Redis database number")
     
+    # Testing
+    TEST_DATABASE_URL: Optional[str] = Field(default=None, description="Override database URL specifically for tests")
+    
     # CORS Settings
     ALLOWED_HOSTS: list = Field(default=["*"], description="Allowed CORS origins")
     
     # Environment
     ENVIRONMENT: str = Field(default="development", description="Environment name")
-    
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = True
-        extra = "ignore"  # Ignore extra environment variables
         
     @property
     def database_url(self) -> str:

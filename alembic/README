@@ -1,0 +1,98 @@
+# Alembic Database Migrations for Discovery Cluster Trading Platform
+
+This directory contains Alembic database migration scripts for the Discovery Cluster trading platform.
+
+## Setup
+
+The migrations are configured to work with PostgreSQL with TimescaleDB extension for time-series data management.
+
+### Database Configuration
+
+- **Database**: PostgreSQL with TimescaleDB extension
+- **Connection**: Configured in `alembic.ini` 
+- **Models**: Located in `app/models/` directory
+
+### Prerequisites
+
+1. PostgreSQL with TimescaleDB extension installed
+2. Database created with proper credentials (see `.env` file)
+3. Virtual environment activated with dependencies installed
+
+## Usage
+
+### Initialize Database Schema
+```bash
+# Run all migrations to latest version
+alembic upgrade head
+```
+
+### Create New Migration
+```bash
+# Auto-generate migration from model changes
+alembic revision --autogenerate -m "Description of changes"
+
+# Create empty migration for manual changes
+alembic revision -m "Description of changes"
+```
+
+### Check Current Migration Status
+```bash
+# Show current database revision
+alembic current
+
+# Show migration history
+alembic history --verbose
+```
+
+### TimescaleDB Features
+
+The initial migration (`eac8f58a5e2b`) sets up:
+- TimescaleDB extension enablement
+- Utility functions for TimescaleDB verification
+- Foundation for hypertables and retention policies
+
+### Model Structure
+
+#### User Models (`app.models.user`)
+- User authentication and profile data
+- Session management
+- Security features (TOTP, rate limiting)
+
+#### Signal Models (`app.models.signal`) 
+- Trading signals with TimescaleDB optimization
+- Market tick data as hypertables
+- Agent performance metrics
+- Time-series data with automatic partitioning
+
+### Development Workflow
+
+1. **Modify Models**: Update SQLAlchemy models in `app/models/`
+2. **Generate Migration**: Run `alembic revision --autogenerate -m "description"`
+3. **Review Migration**: Check generated migration file for correctness
+4. **Apply Migration**: Run `alembic upgrade head`
+5. **Test**: Verify changes work correctly
+
+### TimescaleDB-Specific Operations
+
+For creating hypertables and retention policies, use manual migrations:
+
+```python
+# In migration file upgrade() function
+def upgrade():
+    # Create table first
+    op.create_table('market_ticks', ...)
+    
+    # Convert to hypertable (TimescaleDB-specific)
+    op.execute("SELECT create_hypertable('market_ticks', 'timestamp', chunk_time_interval => INTERVAL '1 day');")
+    
+    # Add retention policy (TimescaleDB-specific)
+    op.execute("SELECT add_retention_policy('market_ticks', INTERVAL '7 years');")
+```
+
+### Troubleshooting
+
+- **TimescaleDB Extension Error**: Ensure TimescaleDB is properly installed in PostgreSQL
+- **Connection Refused**: Check if PostgreSQL service is running and accessible
+- **Import Errors**: Verify all models are properly imported in `env.py`
+
+For more information, see the [Alembic Documentation](https://alembic.sqlalchemy.org/).

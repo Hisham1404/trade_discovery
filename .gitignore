@@ -152,3 +152,4 @@ alembic/versions/*.pyc
 # Temporary project files
 .env.exampl
 .gitignore.bak
+tests/
