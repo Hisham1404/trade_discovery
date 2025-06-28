@@ -1,0 +1,154 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.env
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE and Editor files
+.idea/
+.vscode/
+.cursor/
+*.swp
+*.swo
+*~
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Testing and Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+.hypothesis/
+.tox/
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Docker and containers
+*.log
+docker-compose.override.yml
+.dockerignore
+
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+*.crt
+*.p12
+secrets/
+
+# Database files
+*.db
+*.sqlite3
+
+# Logs and temporary files
+logs/
+*.log
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+
+# Data directories (persistent volumes)
+data/
+data/*
+!data/.gitkeep
+
+# ML Models and weights
+models/
+*.model
+*.pkl
+*.pickle
+*.h5
+*.pt
+*.pth
+*.onnx
+*.pb
+
+# Node.js (for frontend)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.yarn-integrity
+package-lock.json
+yarn.lock
+
+# Build outputs
+build/
+dist/
+*.tgz
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Project specific
+.taskmaster/
+prd_*.md
+*.md.backup
+*.bak
+
+# Jupyter and notebooks
+*.ipynb
+
+# Cache directories
+.cache/
+.pip-cache/
+
+# Alembic migration artifacts
+alembic/versions/*.pyc
+
+# FastAPI specific
+.pytest_cache/
+.cache/
+
+# Large files and datasets
+*.csv
+*.json.gz
+*.parquet
+*.h5
+*.hdf5
+
+# Temporary project files
+.env.exampl
+.gitignore.bak
