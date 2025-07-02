@@ -1,0 +1,479 @@
+"""
+Execution Runner Module
+Production implementation for ADK workflow execution and monitoring
+"""
+
+import asyncio
+import logging
+import time
+import psutil
+from datetime import datetime, timezone, timedelta
+from typing import Dict, List, Any, Optional, Union
+from dataclasses import dataclass
+from enum import Enum
+
+from .adk_infrastructure import ADKAgentFactory, ADKConfig, MockRunner
+from .performance_monitor import PerformanceMonitor
+
+logger = logging.getLogger(__name__)
+
+
+class ExecutionMode(Enum):
+    """Execution modes for the runner"""
+    SEQUENTIAL = "sequential"
+    PARALLEL = "parallel" 
+    BATCH = "batch"
+    CONTINUOUS = "continuous"
+
+
+@dataclass
+class ExecutionConfig:
+    """Configuration for execution runner"""
+    mode: ExecutionMode = ExecutionMode.SEQUENTIAL
+    max_concurrent: int = 4
+    timeout_seconds: int = 300
+    retry_attempts: int = 3
+    batch_size: int = 10
+    monitoring_enabled: bool = True
+    performance_tracking: bool = True
+    error_handling: str = "continue"  # continue, stop, retry
+
+
+@dataclass
+class ExecutionResult:
+    """Result of agent execution"""
+    agent_name: str
+    status: str
+    execution_time: float
+    memory_usage_mb: float
+    result: Any
+    error: Optional[str] = None
+    timestamp: datetime = None
+    retry_count: int = 0
+    context_passed: Dict[str, Any] = None
+    
+    def __post_init__(self):
+        if self.timestamp is None:
+            self.timestamp = datetime.now(timezone.utc)
+
+
+class ExecutionRunner:
+    """Production-grade ADK agent execution runner with comprehensive monitoring"""
+    
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self.is_initialized = False
+        self.is_running = False
+        
+        # Execution configuration
+        exec_config = config.get('execution', {})
+        self.execution_config = ExecutionConfig(
+            mode=ExecutionMode(exec_config.get('mode', 'sequential')),
+            max_concurrent=exec_config.get('max_concurrent', 4),
+            timeout_seconds=exec_config.get('timeout_seconds', 300),
+            retry_attempts=exec_config.get('retry_attempts', 3),
+            batch_size=exec_config.get('batch_size', 10),
+            monitoring_enabled=exec_config.get('monitoring_enabled', True),
+            performance_tracking=exec_config.get('performance_tracking', True),
+            error_handling=exec_config.get('error_handling', 'continue')
+        )
+        
+        # ADK infrastructure
+        adk_config = ADKConfig(
+            model_name=config.get('model_name', 'gpt-4o'),
+            max_tokens=config.get('max_tokens', 2000),
+            temperature=config.get('temperature', 0.1),
+            timeout_seconds=self.execution_config.timeout_seconds,
+            retry_attempts=self.execution_config.retry_attempts
+        )
+        self.adk_factory = ADKAgentFactory(adk_config)
+        
+        # Performance monitoring
+        if self.execution_config.monitoring_enabled:
+            monitor_config = config.get('performance_monitor', {})
+            self.performance_monitor = PerformanceMonitor(monitor_config)
+        else:
+            self.performance_monitor = None
+        
+        # Execution tracking
+        self.execution_history: List[ExecutionResult] = []
+        self.active_executions: Dict[str, asyncio.Task] = {}
+        self.execution_semaphore = asyncio.Semaphore(self.execution_config.max_concurrent)
+        
+        # Metrics
+        self.metrics = {
+            'total_executions': 0,
+            'successful_executions': 0,
+            'failed_executions': 0,
+            'total_execution_time': 0.0,
+            'total_memory_used': 0.0,
+            'average_execution_time': 0.0,
+            'current_success_rate': 0.0,
+            'last_execution': None
+        }
+        
+        logger.info("ExecutionRunner initialized with production configuration")
+    
+    async def initialize(self) -> None:
+        """Initialize execution runner with ADK infrastructure"""
+        try:
+            # Initialize ADK infrastructure
+            await self.adk_factory.initialize()
+            
+            # Initialize performance monitoring
+            if self.performance_monitor:
+                await self.performance_monitor.initialize()
+                if self.execution_config.monitoring_enabled:
+                    await self.performance_monitor.start_monitoring()
+            
+            self.is_initialized = True
+            logger.info("Execution runner initialization completed")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize execution runner: {e}")
+            raise
+    
+    async def execute_agent(self, agent: Any, context: Dict[str, Any] = None) -> ExecutionResult:
+        """Execute a single agent with comprehensive monitoring"""
+        if not self.is_initialized:
+            await self.initialize()
+        
+        agent_name = getattr(agent, 'name', f'agent_{id(agent)}')
+        start_time = time.time()
+        start_memory = self._get_memory_usage()
+        
+        execution_result = ExecutionResult(
+            agent_name=agent_name,
+            status='pending',
+            execution_time=0.0,
+            memory_usage_mb=0.0,
+            result=None,
+            context_passed=context or {}
+        )
+        
+        try:
+            async with self.execution_semaphore:
+                # Execute agent with timeout
+                if hasattr(agent, 'run_async'):
+                    result = await asyncio.wait_for(
+                        agent.run_async(context),
+                        timeout=self.execution_config.timeout_seconds
+                    )
+                elif hasattr(agent, 'analyze_market_data'):
+                    # For trading agents
+                    result = await asyncio.wait_for(
+                        agent.analyze_market_data(context or {}),
+                        timeout=self.execution_config.timeout_seconds
+                    )
+                else:
+                    # Create an async wrapper for synchronous methods
+                    result = await asyncio.get_event_loop().run_in_executor(
+                        None, lambda: self._execute_sync_agent(agent, context)
+                    )
+                
+                # Calculate execution metrics
+                end_time = time.time()
+                execution_time = end_time - start_time
+                end_memory = self._get_memory_usage()
+                memory_usage = max(0, end_memory - start_memory)
+                
+                # Update execution result
+                execution_result.status = 'success'
+                execution_result.execution_time = execution_time
+                execution_result.memory_usage_mb = memory_usage
+                execution_result.result = result
+                
+                # Update metrics
+                self._update_metrics(execution_result)
+                
+                # Record performance data
+                if self.performance_monitor:
+                    await self.performance_monitor.record_execution({
+                        'agent_name': agent_name,
+                        'execution_time': execution_time,
+                        'memory_usage_mb': memory_usage,
+                        'status': 'success',
+                        'timestamp': execution_result.timestamp.isoformat(),
+                        'context_size': len(str(context or {}))
+                    })
+                
+                logger.info(f"Agent {agent_name} executed successfully in {execution_time:.3f}s")
+                
+        except asyncio.TimeoutError:
+            execution_result.status = 'timeout'
+            execution_result.error = f'Execution timed out after {self.execution_config.timeout_seconds}s'
+            execution_result.execution_time = time.time() - start_time
+            execution_result.memory_usage_mb = self._get_memory_usage() - start_memory
+            
+            self._update_metrics(execution_result)
+            logger.error(f"Agent {agent_name} execution timed out")
+            
+        except Exception as e:
+            execution_result.status = 'error'
+            execution_result.error = str(e)
+            execution_result.execution_time = time.time() - start_time
+            execution_result.memory_usage_mb = self._get_memory_usage() - start_memory
+            
+            self._update_metrics(execution_result)
+            logger.error(f"Agent {agent_name} execution failed: {e}")
+        
+        # Store execution result
+        self.execution_history.append(execution_result)
+        
+        return execution_result
+    
+    def _execute_sync_agent(self, agent: Any, context: Dict[str, Any]) -> Any:
+        """Execute synchronous agent methods"""
+        if hasattr(agent, 'process'):
+            return agent.process(context or {})
+        elif hasattr(agent, 'execute'):
+            return agent.execute(context or {})
+        elif callable(agent):
+            return agent(context or {})
+        else:
+            return {
+                'agent_name': getattr(agent, 'name', 'unknown'),
+                'status': 'executed',
+                'message': 'No executable method found'
+            }
+    
+    def _get_memory_usage(self) -> float:
+        """Get current memory usage in MB"""
+        try:
+            process = psutil.Process()
+            return process.memory_info().rss / 1024 / 1024
+        except Exception:
+            return 0.0
+    
+    def _update_metrics(self, result: ExecutionResult) -> None:
+        """Update execution metrics"""
+        self.metrics['total_executions'] += 1
+        self.metrics['total_execution_time'] += result.execution_time
+        self.metrics['total_memory_used'] += result.memory_usage_mb
+        
+        if result.status == 'success':
+            self.metrics['successful_executions'] += 1
+        else:
+            self.metrics['failed_executions'] += 1
+        
+        # Update averages
+        total = self.metrics['total_executions']
+        self.metrics['average_execution_time'] = self.metrics['total_execution_time'] / total
+        self.metrics['current_success_rate'] = self.metrics['successful_executions'] / total
+        self.metrics['last_execution'] = result.timestamp.isoformat()
+    
+    async def execute_workflow(self, agents: List[Any], context: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Execute a workflow of agents based on execution mode"""
+        if not self.is_initialized:
+            await self.initialize()
+        
+        workflow_start_time = time.time()
+        workflow_context = context or {}
+        
+        try:
+            if self.execution_config.mode == ExecutionMode.SEQUENTIAL:
+                results = await self._execute_sequential_workflow(agents, workflow_context)
+            elif self.execution_config.mode == ExecutionMode.PARALLEL:
+                results = await self._execute_parallel_workflow(agents, workflow_context)
+            elif self.execution_config.mode == ExecutionMode.BATCH:
+                results = await self._execute_batch_workflow(agents, workflow_context)
+            else:
+                raise ValueError(f"Unsupported execution mode: {self.execution_config.mode}")
+            
+            workflow_time = time.time() - workflow_start_time
+            
+            # Calculate workflow statistics
+            successful_results = [r for r in results if r.status == 'success']
+            failed_results = [r for r in results if r.status != 'success']
+            
+            return {
+                'workflow_status': 'success' if len(failed_results) == 0 else 'partial',
+                'total_agents': len(agents),
+                'successful_executions': len(successful_results),
+                'failed_executions': len(failed_results),
+                'workflow_execution_time': workflow_time,
+                'results': [self._result_to_dict(r) for r in results],
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"Workflow execution failed: {e}")
+            return {
+                'workflow_status': 'error',
+                'error': str(e),
+                'workflow_execution_time': time.time() - workflow_start_time,
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            }
+    
+    async def _execute_sequential_workflow(self, agents: List[Any], context: Dict[str, Any]) -> List[ExecutionResult]:
+        """Execute agents sequentially"""
+        results = []
+        current_context = context.copy()
+        
+        for i, agent in enumerate(agents):
+            # Add previous results to context
+            current_context['step'] = i + 1
+            current_context['previous_results'] = [self._result_to_dict(r) for r in results]
+            
+            result = await self.execute_agent(agent, current_context)
+            results.append(result)
+            
+            # Handle errors based on configuration
+            if result.status != 'success' and self.execution_config.error_handling == 'stop':
+                logger.warning(f"Stopping workflow execution due to agent {result.agent_name} failure")
+                break
+        
+        return results
+    
+    async def _execute_parallel_workflow(self, agents: List[Any], context: Dict[str, Any]) -> List[ExecutionResult]:
+        """Execute agents in parallel"""
+        tasks = []
+        
+        # Create tasks for all agents
+        for agent in agents:
+            task = asyncio.create_task(self.execute_agent(agent, context))
+            tasks.append(task)
+        
+        # Execute all tasks and collect results
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Process results and handle exceptions
+        processed_results = []
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                error_result = ExecutionResult(
+                    agent_name=f'agent_{i}',
+                    status='error',
+                    execution_time=0.0,
+                    memory_usage_mb=0.0,
+                    result=None,
+                    error=str(result)
+                )
+                processed_results.append(error_result)
+            else:
+                processed_results.append(result)
+        
+        return processed_results
+    
+    async def _execute_batch_workflow(self, agents: List[Any], context: Dict[str, Any]) -> List[ExecutionResult]:
+        """Execute agents in batches"""
+        results = []
+        batch_size = self.execution_config.batch_size
+        
+        # Process agents in batches
+        for i in range(0, len(agents), batch_size):
+            batch = agents[i:i + batch_size]
+            batch_context = context.copy()
+            batch_context['batch_number'] = (i // batch_size) + 1
+            
+            # Execute batch in parallel
+            batch_results = await self._execute_parallel_workflow(batch, batch_context)
+            results.extend(batch_results)
+            
+            # Small delay between batches to prevent overwhelming
+            if i + batch_size < len(agents):
+                await asyncio.sleep(0.1)
+        
+        return results
+    
+    def _result_to_dict(self, result: ExecutionResult) -> Dict[str, Any]:
+        """Convert ExecutionResult to dictionary"""
+        return {
+            'agent_name': result.agent_name,
+            'status': result.status,
+            'execution_time': result.execution_time,
+            'memory_usage_mb': result.memory_usage_mb,
+            'result': result.result,
+            'error': result.error,
+            'timestamp': result.timestamp.isoformat(),
+            'retry_count': result.retry_count
+        }
+    
+    async def get_execution_metrics(self) -> Dict[str, Any]:
+        """Get comprehensive execution metrics"""
+        current_time = datetime.now(timezone.utc)
+        
+        # Calculate time-based metrics
+        recent_executions = [
+            result for result in self.execution_history
+            if (current_time - result.timestamp).total_seconds() < 3600  # Last hour
+        ]
+        
+        recent_success_rate = 0.0
+        recent_avg_time = 0.0
+        
+        if recent_executions:
+            successful_recent = sum(1 for r in recent_executions if r.status == 'success')
+            recent_success_rate = successful_recent / len(recent_executions)
+            recent_avg_time = sum(r.execution_time for r in recent_executions) / len(recent_executions)
+        
+        return {
+            'timestamp': current_time.isoformat(),
+            'overall_metrics': dict(self.metrics),
+            'recent_metrics': {
+                'recent_executions_count': len(recent_executions),
+                'recent_success_rate': recent_success_rate,
+                'recent_average_execution_time': recent_avg_time
+            },
+            'execution_config': {
+                'mode': self.execution_config.mode.value,
+                'max_concurrent': self.execution_config.max_concurrent,
+                'timeout_seconds': self.execution_config.timeout_seconds,
+                'retry_attempts': self.execution_config.retry_attempts
+            },
+            'system_status': {
+                'is_initialized': self.is_initialized,
+                'is_running': self.is_running,
+                'active_executions': len(self.active_executions),
+                'monitoring_enabled': self.execution_config.monitoring_enabled
+            }
+        }
+    
+    async def stop(self) -> None:
+        """Stop the execution runner and cleanup"""
+        logger.info("Stopping execution runner...")
+        self.is_running = False
+        
+        # Cancel active executions
+        for task in self.active_executions.values():
+            task.cancel()
+        
+        # Wait for tasks to complete
+        if self.active_executions:
+            await asyncio.gather(*self.active_executions.values(), return_exceptions=True)
+        
+        # Stop performance monitoring
+        if self.performance_monitor:
+            await self.performance_monitor.stop_monitoring()
+        
+        logger.info("Execution runner stopped")
+    
+    def get_execution_history(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """Get recent execution history"""
+        recent_history = self.execution_history[-limit:] if limit > 0 else self.execution_history
+        return [self._result_to_dict(result) for result in recent_history]
+    
+    def get_agent_performance(self, agent_name: str) -> Dict[str, Any]:
+        """Get performance metrics for a specific agent"""
+        agent_executions = [r for r in self.execution_history if r.agent_name == agent_name]
+        
+        if not agent_executions:
+            return {'error': f'No execution data found for agent {agent_name}'}
+        
+        total_executions = len(agent_executions)
+        successful_executions = sum(1 for r in agent_executions if r.status == 'success')
+        total_time = sum(r.execution_time for r in agent_executions)
+        total_memory = sum(r.memory_usage_mb for r in agent_executions)
+        
+        return {
+            'agent_name': agent_name,
+            'total_executions': total_executions,
+            'success_rate': successful_executions / total_executions,
+            'average_execution_time': total_time / total_executions,
+            'average_memory_usage_mb': total_memory / total_executions,
+            'last_execution': agent_executions[-1].timestamp.isoformat(),
+            'recent_errors': [
+                {'error': r.error, 'timestamp': r.timestamp.isoformat()}
+                for r in agent_executions[-10:] if r.error
+            ]
+        } 

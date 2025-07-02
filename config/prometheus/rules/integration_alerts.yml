@@ -1,0 +1,320 @@
+groups:
+  - name: integration_monitoring
+    rules:
+      # Event Publishing Alerts
+      - alert: HighEventPublishingFailureRate
+        expr: rate(trade_discovery_integration_events_published_total{status="error"}[5m]) / rate(trade_discovery_integration_events_published_total[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+          category: integration
+          component: event_publishing
+        annotations:
+          summary: "High event publishing failure rate detected"
+          description: "Event publishing failure rate is {{ $value | humanizePercentage }} for cluster {{ $labels.source_cluster }} to {{ $labels.target_cluster }}"
+          runbook_url: "https://wiki.internal/runbook/integration-publishing-failures"
+
+      - alert: CriticalEventPublishingFailureRate
+        expr: rate(trade_discovery_integration_events_published_total{status="error"}[5m]) / rate(trade_discovery_integration_events_published_total[5m]) > 0.20
+        for: 1m
+        labels:
+          severity: critical
+          category: integration
+          component: event_publishing
+        annotations:
+          summary: "Critical event publishing failure rate detected"
+          description: "Event publishing failure rate is {{ $value | humanizePercentage }} for cluster {{ $labels.source_cluster }} to {{ $labels.target_cluster }}"
+          runbook_url: "https://wiki.internal/runbook/integration-publishing-failures"
+
+      # Event Consumption Alerts
+      - alert: HighEventConsumingFailureRate
+        expr: rate(trade_discovery_integration_events_consumed_total{status="error"}[5m]) / rate(trade_discovery_integration_events_consumed_total[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+          category: integration
+          component: event_consuming
+        annotations:
+          summary: "High event consumption failure rate detected"
+          description: "Event consumption failure rate is {{ $value | humanizePercentage }} for cluster {{ $labels.source_cluster }} from {{ $labels.target_cluster }}"
+          runbook_url: "https://wiki.internal/runbook/integration-consumption-failures"
+
+      # Latency Alerts
+      - alert: HighEventPublishingLatency
+        expr: histogram_quantile(0.95, rate(trade_discovery_integration_event_publish_duration_seconds_bucket[5m])) > 1.0
+        for: 3m
+        labels:
+          severity: warning
+          category: integration
+          component: latency
+        annotations:
+          summary: "High event publishing latency detected"
+          description: "95th percentile event publishing latency is {{ $value }}s for {{ $labels.source_cluster }} to {{ $labels.target_cluster }}"
+          runbook_url: "https://wiki.internal/runbook/integration-latency"
+
+      - alert: CriticalEventPublishingLatency
+        expr: histogram_quantile(0.95, rate(trade_discovery_integration_event_publish_duration_seconds_bucket[5m])) > 5.0
+        for: 1m
+        labels:
+          severity: critical
+          category: integration
+          component: latency
+        annotations:
+          summary: "Critical event publishing latency detected"
+          description: "95th percentile event publishing latency is {{ $value }}s for {{ $labels.source_cluster }} to {{ $labels.target_cluster }}"
+          runbook_url: "https://wiki.internal/runbook/integration-latency"
+
+      - alert: HighEndToEndLatency
+        expr: histogram_quantile(0.95, rate(trade_discovery_integration_end_to_end_latency_seconds_bucket[5m])) > 5.0
+        for: 3m
+        labels:
+          severity: warning
+          category: integration
+          component: latency
+        annotations:
+          summary: "High end-to-end latency detected"
+          description: "95th percentile end-to-end latency is {{ $value }}s for {{ $labels.source_cluster }} to {{ $labels.target_cluster }}"
+          runbook_url: "https://wiki.internal/runbook/end-to-end-latency"
+
+      - alert: CriticalEndToEndLatency
+        expr: histogram_quantile(0.95, rate(trade_discovery_integration_end_to_end_latency_seconds_bucket[5m])) > 30.0
+        for: 1m
+        labels:
+          severity: critical
+          category: integration
+          component: latency
+        annotations:
+          summary: "Critical end-to-end latency detected"
+          description: "95th percentile end-to-end latency is {{ $value }}s for {{ $labels.source_cluster }} to {{ $labels.target_cluster }}"
+          runbook_url: "https://wiki.internal/runbook/end-to-end-latency"
+
+      # Circuit Breaker Alerts
+      - alert: CircuitBreakerOpen
+        expr: trade_discovery_integration_circuit_breaker_state == 1
+        for: 0m
+        labels:
+          severity: critical
+          category: integration
+          component: circuit_breaker
+        annotations:
+          summary: "Circuit breaker is open"
+          description: "Circuit breaker for {{ $labels.component }} in cluster {{ $labels.cluster }} is open"
+          runbook_url: "https://wiki.internal/runbook/circuit-breaker-open"
+
+      - alert: CircuitBreakerHalfOpen
+        expr: trade_discovery_integration_circuit_breaker_state == 2
+        for: 5m
+        labels:
+          severity: warning
+          category: integration
+          component: circuit_breaker
+        annotations:
+          summary: "Circuit breaker stuck in half-open state"
+          description: "Circuit breaker for {{ $labels.component }} in cluster {{ $labels.cluster }} has been half-open for more than 5 minutes"
+          runbook_url: "https://wiki.internal/runbook/circuit-breaker-half-open"
+
+      # Pulsar Connectivity Alerts
+      - alert: PulsarConnectivityLoss
+        expr: trade_discovery_integration_pulsar_connectivity == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: integration
+          component: pulsar
+        annotations:
+          summary: "Pulsar connectivity lost"
+          description: "Pulsar connectivity lost for cluster {{ $labels.cluster }} broker {{ $labels.broker }}"
+          runbook_url: "https://wiki.internal/runbook/pulsar-connectivity"
+
+      # Consumer Lag Alerts
+      - alert: HighConsumerLag
+        expr: trade_discovery_integration_consumer_lag_messages > 1000
+        for: 2m
+        labels:
+          severity: warning
+          category: integration
+          component: consumer_lag
+        annotations:
+          summary: "High consumer lag detected"
+          description: "Consumer lag is {{ $value }} messages for {{ $labels.subscription }} on topic {{ $labels.topic }} in cluster {{ $labels.cluster }}"
+          runbook_url: "https://wiki.internal/runbook/consumer-lag"
+
+      - alert: CriticalConsumerLag
+        expr: trade_discovery_integration_consumer_lag_messages > 10000
+        for: 1m
+        labels:
+          severity: critical
+          category: integration
+          component: consumer_lag
+        annotations:
+          summary: "Critical consumer lag detected"
+          description: "Consumer lag is {{ $value }} messages for {{ $labels.subscription }} on topic {{ $labels.topic }} in cluster {{ $labels.cluster }}"
+          runbook_url: "https://wiki.internal/runbook/consumer-lag"
+
+      - alert: HighConsumerTimeLag
+        expr: trade_discovery_integration_consumer_lag_time_seconds > 300
+        for: 2m
+        labels:
+          severity: warning
+          category: integration
+          component: consumer_lag
+        annotations:
+          summary: "High consumer time lag detected"
+          description: "Consumer time lag is {{ $value }}s for {{ $labels.subscription }} on topic {{ $labels.topic }} in cluster {{ $labels.cluster }}"
+          runbook_url: "https://wiki.internal/runbook/consumer-lag"
+
+      # Throughput Alerts
+      - alert: LowEventThroughput
+        expr: trade_discovery_integration_throughput_events_per_second < 1 and trade_discovery_integration_throughput_events_per_second > 0
+        for: 10m
+        labels:
+          severity: warning
+          category: integration
+          component: throughput
+        annotations:
+          summary: "Low event throughput detected"
+          description: "Event throughput is {{ $value }} events/second for {{ $labels.direction }} in cluster {{ $labels.cluster }}"
+          runbook_url: "https://wiki.internal/runbook/low-throughput"
+
+      - alert: NoEventThroughput
+        expr: trade_discovery_integration_throughput_events_per_second == 0
+        for: 5m
+        labels:
+          severity: critical
+          category: integration
+          component: throughput
+        annotations:
+          summary: "No event throughput detected"
+          description: "No events processed for {{ $labels.direction }} in cluster {{ $labels.cluster }} for 5 minutes"
+          runbook_url: "https://wiki.internal/runbook/no-throughput"
+
+      # SLA Violations
+      - alert: SLAViolationRateHigh
+        expr: rate(trade_discovery_integration_sla_violations_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          category: integration
+          component: sla
+        annotations:
+          summary: "High SLA violation rate"
+          description: "SLA violation rate is {{ $value }}/min for {{ $labels.sla_type }} in cluster {{ $labels.cluster }}"
+          runbook_url: "https://wiki.internal/runbook/sla-violations"
+
+      # Availability Alerts
+      - alert: LowIntegrationAvailability
+        expr: trade_discovery_integration_availability_ratio < 0.95
+        for: 5m
+        labels:
+          severity: warning
+          category: integration
+          component: availability
+        annotations:
+          summary: "Low integration availability"
+          description: "Integration availability is {{ $value | humanizePercentage }} for {{ $labels.service }} in cluster {{ $labels.cluster }}"
+          runbook_url: "https://wiki.internal/runbook/low-availability"
+
+      - alert: CriticalIntegrationAvailability
+        expr: trade_discovery_integration_availability_ratio < 0.90
+        for: 2m
+        labels:
+          severity: critical
+          category: integration
+          component: availability
+        annotations:
+          summary: "Critical integration availability"
+          description: "Integration availability is {{ $value | humanizePercentage }} for {{ $labels.service }} in cluster {{ $labels.cluster }}"
+          runbook_url: "https://wiki.internal/runbook/critical-availability"
+
+      # Error Rate Spike
+      - alert: IntegrationErrorSpike
+        expr: rate(trade_discovery_integration_integration_errors_total[5m]) > rate(trade_discovery_integration_integration_errors_total[1h] offset 1h) * 3
+        for: 2m
+        labels:
+          severity: warning
+          category: integration
+          component: errors
+        annotations:
+          summary: "Integration error rate spike detected"
+          description: "Integration error rate is 3x higher than usual for {{ $labels.error_type }} between {{ $labels.source_cluster }} and {{ $labels.target_cluster }}"
+          runbook_url: "https://wiki.internal/runbook/error-spike"
+
+      # Resource Usage Alerts
+      - alert: HighMessageQueueSize
+        expr: trade_discovery_integration_message_queue_size > 10000
+        for: 5m
+        labels:
+          severity: warning
+          category: integration
+          component: resources
+        annotations:
+          summary: "High message queue size"
+          description: "Message queue size is {{ $value }} for {{ $labels.queue_type }} in cluster {{ $labels.cluster }}"
+          runbook_url: "https://wiki.internal/runbook/high-queue-size"
+
+      - alert: CriticalMessageQueueSize
+        expr: trade_discovery_integration_message_queue_size > 50000
+        for: 2m
+        labels:
+          severity: critical
+          category: integration
+          component: resources
+        annotations:
+          summary: "Critical message queue size"
+          description: "Message queue size is {{ $value }} for {{ $labels.queue_type }} in cluster {{ $labels.cluster }}"
+          runbook_url: "https://wiki.internal/runbook/critical-queue-size"
+
+      # Health Check Alerts
+      - alert: HealthCheckFailure
+        expr: up{job=~".*integration.*"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: integration
+          component: health
+        annotations:
+          summary: "Integration health check failure"
+          description: "Health check failed for {{ $labels.instance }} in job {{ $labels.job }}"
+          runbook_url: "https://wiki.internal/runbook/health-check-failure"
+
+  - name: integration_sla_monitoring
+    interval: 30s
+    rules:
+      # SLA Compliance Recording Rules
+      - record: integration:publish_success_rate_5m
+        expr: rate(trade_discovery_integration_events_published_total{status="success"}[5m]) / rate(trade_discovery_integration_events_published_total[5m])
+
+      - record: integration:consume_success_rate_5m
+        expr: rate(trade_discovery_integration_events_consumed_total{status="success"}[5m]) / rate(trade_discovery_integration_events_consumed_total[5m])
+
+      - record: integration:publish_latency_p95_5m
+        expr: histogram_quantile(0.95, rate(trade_discovery_integration_event_publish_duration_seconds_bucket[5m]))
+
+      - record: integration:consume_latency_p95_5m
+        expr: histogram_quantile(0.95, rate(trade_discovery_integration_event_consume_duration_seconds_bucket[5m]))
+
+      - record: integration:end_to_end_latency_p95_5m
+        expr: histogram_quantile(0.95, rate(trade_discovery_integration_end_to_end_latency_seconds_bucket[5m]))
+
+      - record: integration:error_rate_5m
+        expr: rate(trade_discovery_integration_integration_errors_total[5m])
+
+      - record: integration:throughput_5m
+        expr: rate(trade_discovery_integration_events_published_total[5m]) + rate(trade_discovery_integration_events_consumed_total[5m])
+
+      # Daily SLA Compliance (24h window)
+      - record: integration:publish_success_rate_24h
+        expr: rate(trade_discovery_integration_events_published_total{status="success"}[24h]) / rate(trade_discovery_integration_events_published_total[24h])
+
+      - record: integration:availability_24h
+        expr: avg_over_time(trade_discovery_integration_availability_ratio[24h])
+
+      - record: integration:publish_latency_p95_24h
+        expr: histogram_quantile(0.95, rate(trade_discovery_integration_event_publish_duration_seconds_bucket[24h]))
+
+      # Weekly trends
+      - record: integration:publish_success_rate_7d
+        expr: rate(trade_discovery_integration_events_published_total{status="success"}[7d]) / rate(trade_discovery_integration_events_published_total[7d])
+
+      - record: integration:availability_7d
+        expr: avg_over_time(trade_discovery_integration_availability_ratio[7d]) 

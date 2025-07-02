@@ -1,0 +1,290 @@
+version: '3.8'
+
+networks:
+  monitoring:
+    driver: bridge
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  jaeger_data:
+  alertmanager_data:
+
+services:
+  # Prometheus - Production Metrics Collection and Storage
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    container_name: prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=30d'
+      - '--storage.tsdb.retention.size=100GB'
+      - '--web.enable-lifecycle'
+      - '--web.external-url=http://localhost:9090'
+      - '--web.route-prefix=/'
+      - '--log.level=info'
+      - '--storage.tsdb.max-block-duration=2h'
+      - '--storage.tsdb.min-block-duration=2h'
+      - '--web.enable-remote-write-receiver'
+      - '--query.max-concurrency=20'
+      - '--query.max-samples=50000000'
+    volumes:
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - monitoring
+    environment:
+      - PROMETHEUS_RETENTION_TIME=${PROMETHEUS_RETENTION_TIME:-30d}
+      - PROMETHEUS_RETENTION_SIZE=${PROMETHEUS_RETENTION_SIZE:-100GB}
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+        reservations:
+          memory: 2G
+          cpus: '1.0'
+    labels:
+      org.label-schema.group: "monitoring"
+      org.label-schema.service: "prometheus"
+
+  # Grafana - Production Visualization and Dashboards
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: grafana
+    restart: unless-stopped
+    environment:
+      # Security - Production Configuration
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-TradeDiscovery2024SecureAdmin}
+      - GF_SECURITY_SECRET_KEY=${GRAFANA_SECRET_KEY:-TradeDiscovery2024ProductionSecretKey32Chars}
+      - GF_SECURITY_DISABLE_GRAVATAR=true
+      - GF_SECURITY_COOKIE_SECURE=${GRAFANA_COOKIE_SECURE:-false}
+      - GF_SECURITY_COOKIE_SAMESITE=${GRAFANA_COOKIE_SAMESITE:-lax}
+      - GF_SECURITY_STRICT_TRANSPORT_SECURITY=${GRAFANA_HSTS:-false}
+      - GF_SECURITY_X_CONTENT_TYPE_OPTIONS=nosniff
+      - GF_SECURITY_X_XSS_PROTECTION=true
+      
+      # Users and Authentication
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_USERS_ALLOW_ORG_CREATE=false
+      - GF_USERS_AUTO_ASSIGN_ORG=true
+      - GF_USERS_AUTO_ASSIGN_ORG_ROLE=Viewer
+      - GF_AUTH_DISABLE_LOGIN_FORM=false
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      
+      # Server Configuration
+      - GF_SERVER_PROTOCOL=${GRAFANA_PROTOCOL:-http}
+      - GF_SERVER_HTTP_PORT=3000
+      - GF_SERVER_DOMAIN=${GRAFANA_DOMAIN:-localhost}
+      - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s:%(http_port)s/
+      - GF_SERVER_SERVE_FROM_SUB_PATH=false
+      
+      # TLS Configuration (for production)
+      - GF_SERVER_CERT_FILE=${GRAFANA_CERT_FILE:-}
+      - GF_SERVER_CERT_KEY=${GRAFANA_CERT_KEY:-}
+      
+      # Database Configuration
+      - GF_DATABASE_TYPE=sqlite3
+      - GF_DATABASE_PATH=/var/lib/grafana/grafana.db
+      - GF_DATABASE_WAL=true
+      
+      # Session Configuration
+      - GF_SESSION_PROVIDER=file
+      - GF_SESSION_PROVIDER_CONFIG=/var/lib/grafana/sessions
+      - GF_SESSION_COOKIE_SECURE=${GRAFANA_COOKIE_SECURE:-false}
+      - GF_SESSION_COOKIE_SAME_SITE=${GRAFANA_COOKIE_SAMESITE:-lax}
+      - GF_SESSION_SESSION_LIFE_TIME=86400
+      
+      # Performance and Limits
+      - GF_DATAPROXY_TIMEOUT=300
+      - GF_DATAPROXY_DIAL_TIMEOUT=30
+      - GF_DATAPROXY_KEEP_ALIVE_SECONDS=30
+      
+      # Logging
+      - GF_LOG_MODE=console,file
+      - GF_LOG_LEVEL=${GRAFANA_LOG_LEVEL:-info}
+      - GF_LOG_FILTERS=rendering:debug
+      
+      # Feature Toggles
+      - GF_FEATURE_TOGGLES_ENABLE=publicDashboards,lokiExplore
+      
+      # Plugins
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+      
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./config/grafana/dashboards:/etc/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    networks:
+      - monitoring
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 120s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    labels:
+      org.label-schema.group: "monitoring"
+      org.label-schema.service: "grafana"
+
+  # Jaeger - Production Distributed Tracing
+  jaeger:
+    image: jaegertracing/all-in-one:1.60.0
+    container_name: jaeger
+    restart: unless-stopped
+    command:
+      - "--memory.max-traces=100000"
+      - "--query.base-path=/jaeger/ui"
+      - "--span-storage.type=badger"
+      - "--badger.ephemeral=false"
+      - "--badger.directory-key=/tmp/jaeger-badger-key"
+      - "--badger.directory-value=/tmp/jaeger-badger-value"
+      - "--collector.otlp.enabled=true"
+      - "--collector.otlp.grpc.host-port=0.0.0.0:4317"
+      - "--collector.otlp.http.host-port=0.0.0.0:4318"
+      - "--log-level=info"
+      - "--query.max-clock-skew-adjustment=0s"
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+      - QUERY_BASE_PATH=/jaeger/ui
+      - SPAN_STORAGE_TYPE=badger
+      - BADGER_EPHEMERAL=false
+      - BADGER_DIRECTORY_KEY=/tmp/jaeger-badger-key
+      - BADGER_DIRECTORY_VALUE=/tmp/jaeger-badger-value
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "4317:4317"    # OTLP gRPC receiver
+      - "4318:4318"    # OTLP HTTP receiver
+      - "14250:14250"  # Jaeger gRPC
+    volumes:
+      - jaeger_data:/tmp
+    networks:
+      - monitoring
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:16686/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    labels:
+      org.label-schema.group: "monitoring"
+      org.label-schema.service: "jaeger"
+
+  # cAdvisor - Production Container Metrics
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: cadvisor
+    restart: unless-stopped
+    privileged: true
+    devices:
+      - /dev/kmsg:/dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "8082:8080"
+    networks:
+      - monitoring
+    command:
+      - '--docker_only=true'
+      - '--housekeeping_interval=30s'
+      - '--max_housekeeping_interval=35s'
+      - '--allow_dynamic_housekeeping=true'
+      - '--global_housekeeping_interval=30s'
+      - '--disable_metrics=accelerator,cpu_topology,disk,memory_numa,tcp,udp,percpu,sched,process,hugetlb,referenced_memory,resctrl,cpuset,advtcp,memory_numa'
+      - '--store_container_labels=false'
+      - '--whitelisted_container_labels=name,io.kubernetes.container.name,io.kubernetes.pod.name'
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+    labels:
+      org.label-schema.group: "monitoring"
+      org.label-schema.service: "cadvisor" 
+
+  # Alertmanager - Production Alert Routing and Notifications
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: alertmanager
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      - '--web.external-url=http://localhost:9093'
+      - '--web.route-prefix=/'
+      - '--cluster.listen-address='
+      - '--log.level=info'
+    volumes:
+      - ./config/alertmanager:/etc/alertmanager:ro
+      - alertmanager_data:/alertmanager
+    ports:
+      - "9093:9093"
+    networks:
+      - monitoring
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9093/-/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+          cpus: '0.25'
+    labels:
+      org.label-schema.group: "monitoring"
+      org.label-schema.service: "alertmanager" 

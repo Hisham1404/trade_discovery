@@ -1,0 +1,291 @@
+global:
+  smtp_smarthost: 'localhost:587'
+  smtp_from: 'alerts@tradediscovery.com'
+  smtp_auth_username: ''
+  smtp_auth_password: ''
+  smtp_require_tls: true
+  resolve_timeout: 5m
+  http_config:
+    proxy_url: ''
+  slack_api_url: ''
+
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+route:
+  group_by: ['alertname', 'cluster', 'service', 'component', 'severity']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 12h
+  receiver: 'web.hook.default'
+  routes:
+    # Critical alerts during business hours - immediate escalation
+    - match:
+        severity: critical
+      receiver: 'critical-alerts'
+      group_wait: 5s
+      repeat_interval: 5m
+      active_time_intervals:
+        - business-hours
+      
+    # Critical alerts outside business hours - faster escalation to on-call
+    - match:
+        severity: critical
+      receiver: 'critical-alerts'
+      group_wait: 2s
+      repeat_interval: 3m
+      active_time_intervals:
+        - out-of-hours
+    
+    # Security alerts - always high priority regardless of time
+    - match:
+        component: security
+      receiver: 'security-alerts'
+      group_wait: 10s
+      repeat_interval: 15m
+      
+    # Data quality alerts during market hours (9 AM - 6 PM IST)
+    - match:
+        component: data_quality
+      receiver: 'data-quality-alerts'
+      group_wait: 30s
+      repeat_interval: 20m
+      active_time_intervals:
+        - business-hours
+        
+    # Data quality alerts outside market hours - less frequent
+    - match:
+        component: data_quality
+      receiver: 'data-quality-alerts'
+      group_wait: 2m
+      repeat_interval: 1h
+      active_time_intervals:
+        - out-of-hours
+    
+    # Cost alerts - only during business hours
+    - match:
+        component: cost_management
+      receiver: 'warning-alerts'
+      group_wait: 5m
+      repeat_interval: 2h
+      active_time_intervals:
+        - business-hours
+    
+    # General warnings during business hours
+    - match:
+        severity: warning
+      receiver: 'warning-alerts'
+      group_wait: 30s
+      repeat_interval: 1h
+      active_time_intervals:
+        - business-hours
+        
+    # General warnings outside business hours - less frequent
+    - match:
+        severity: warning
+      receiver: 'warning-alerts'
+      group_wait: 2m
+      repeat_interval: 4h
+      active_time_intervals:
+        - out-of-hours
+        
+    # Dead man's switch - always null
+    - match:
+        alertname: DeadMansSwitch
+      receiver: 'null'
+
+receivers:
+  - name: 'null'
+
+  - name: 'security-alerts'
+    email_configs:
+      - to: 'security@tradediscovery.com'
+        subject: '🔐 SECURITY: {{ .GroupLabels.alertname }} - Trading Platform'
+        body: |
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Severity: {{ .Labels.severity }}
+          Security Type: {{ .Labels.security_type }}
+          Impact: {{ .Annotations.impact }}
+          Action: {{ .Annotations.action }}
+          Time: {{ .StartsAt }}
+          {{ end }}
+        headers:
+          X-Priority: '1'
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#security-alerts'
+        title: '🔐 Security Alert: Trading Platform'
+        text: |
+          {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Security Type:* {{ .Labels.security_type }}
+          *Impact:* {{ .Annotations.impact }}
+          *Action Required:* {{ .Annotations.action }}
+          {{ end }}
+        send_resolved: true
+        color: '#ff9900'
+    pagerduty_configs:
+      - routing_key: '${PAGERDUTY_SECURITY_KEY}'
+        description: 'Security Alert: {{ .GroupLabels.alertname }}'
+        severity: '{{ .Labels.severity }}'
+
+  - name: 'data-quality-alerts'
+    email_configs:
+      - to: 'data@tradediscovery.com'
+        subject: '📊 DATA QUALITY: {{ .GroupLabels.alertname }} - Trading Platform'
+        body: |
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Data Type: {{ .Labels.data_type }}
+          Impact: {{ .Annotations.impact }}
+          Action: {{ .Annotations.action }}
+          Time: {{ .StartsAt }}
+          {{ end }}
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#data-quality'
+        title: '📊 Data Quality Alert'
+        text: |
+          {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }}
+          *Data Type:* {{ .Labels.data_type }}
+          *Impact:* {{ .Annotations.impact }}
+          *Action:* {{ .Annotations.action }}
+          {{ end }}
+        send_resolved: true
+
+  - name: 'web.hook.default'
+    webhook_configs:
+      - url: 'http://localhost:5001/alerts'
+        send_resolved: true
+        http_config:
+          proxy_url: ''
+        max_alerts: 0
+
+  - name: 'critical-alerts'
+    email_configs:
+      - to: 'admin@tradediscovery.com'
+        subject: '🚨 CRITICAL: {{ .GroupLabels.alertname }} - Trading Platform'
+        body: |
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Severity: {{ .Labels.severity }}
+          Instance: {{ .Labels.instance }}
+          Time: {{ .StartsAt }}
+          {{ end }}
+        headers:
+          X-Priority: '1'
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#alerts-critical'
+        title: '🚨 CRITICAL: Trading Platform Alert'
+        text: |
+          {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Severity:* {{ .Labels.severity }}
+          *Component:* {{ .Labels.component }}
+          *Instance:* {{ .Labels.instance }}
+          *Runbook:* {{ .Annotations.runbook_url }}
+          {{ end }}
+        send_resolved: true
+        color: 'danger'
+    pagerduty_configs:
+      - routing_key: '${PAGERDUTY_INTEGRATION_KEY}'
+        description: '{{ .GroupLabels.alertname }} - Trading Platform Critical Alert'
+        severity: 'critical'
+        details:
+          summary: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+          component: '{{ .GroupLabels.component }}'
+          group: '{{ .GroupLabels.alertname }}'
+    webhook_configs:
+      - url: 'http://localhost:5001/critical-alerts'
+        send_resolved: true
+
+  - name: 'warning-alerts'
+    email_configs:
+      - to: 'ops@tradediscovery.com'
+        subject: '⚠️ WARNING: {{ .GroupLabels.alertname }} - Trading Platform'
+        body: |
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Severity: {{ .Labels.severity }}
+          Instance: {{ .Labels.instance }}
+          Time: {{ .StartsAt }}
+          {{ end }}
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#alerts-warning'
+        title: '⚠️ Trading Platform Warning'
+        text: |
+          {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Severity:* {{ .Labels.severity }}
+          *Component:* {{ .Labels.component }}
+          {{ end }}
+        send_resolved: true
+
+inhibit_rules:
+  # Critical alerts suppress warnings for the same component
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'cluster', 'service', 'component']
+  
+  # Agent down suppresses other agent alerts
+  - source_match:
+      alertname: 'AgentDown'
+    target_match_re:
+      alertname: 'Agent.*'
+    equal: ['instance', 'agent_type']
+  
+  # Database down suppresses database-related alerts
+  - source_match:
+      alertname: 'PostgreSQLDown'
+    target_match_re:
+      alertname: '.*Database.*|.*DB.*'
+    equal: ['instance']
+  
+  # Security breach suppresses other security alerts
+  - source_match:
+      security_type: 'authentication'
+      severity: 'critical'
+    target_match:
+      component: 'security'
+    equal: ['source_ip']
+  
+  # Data quality critical alerts suppress warnings
+  - source_match:
+      component: 'data_quality'
+      severity: 'critical'
+    target_match:
+      component: 'data_quality'
+      severity: 'warning'
+    equal: ['data_type', 'source']
+
+time_intervals:
+  - name: business-hours
+    time_intervals:
+      - times:
+          - start_time: '09:00'
+            end_time: '17:00'
+        weekdays: ['monday:friday']
+        location: 'Asia/Kolkata'
+
+  - name: out-of-hours
+    time_intervals:
+      - times:
+          - start_time: '17:00'
+            end_time: '09:00'
+        weekdays: ['monday:friday']
+        location: 'Asia/Kolkata'
+      - weekdays: ['saturday', 'sunday']
+        location: 'Asia/Kolkata' 

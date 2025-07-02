@@ -1,0 +1,424 @@
+version: '3.8'
+
+services:
+  # =============================================================================
+  # DATABASE INFRASTRUCTURE
+  # =============================================================================
+  
+  # Primary PostgreSQL with TimescaleDB
+  postgres-primary:
+    image: timescale/timescaledb:latest-pg15
+    container_name: trade_postgres_primary
+    environment:
+      POSTGRES_DB: trading
+      POSTGRES_USER: trading_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    volumes:
+      - postgres_primary_data:/var/lib/postgresql/data
+      - ./scripts/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - ./config/postgres/postgresql.conf:/etc/postgresql/postgresql.conf
+    ports:
+      - "5432:5432"
+    networks:
+      - trade_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trading_user -d trading"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '1.0'
+          memory: 2G
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: trade_redis
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+      - ./config/redis/redis.conf:/usr/local/etc/redis/redis.conf
+    ports:
+      - "6379:6379"
+    networks:
+      - trade_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+
+  # =============================================================================
+  # MESSAGE BROKER INFRASTRUCTURE
+  # =============================================================================
+  
+  # Apache Pulsar
+  pulsar:
+    image: apachepulsar/pulsar:3.1.0
+    container_name: trade_pulsar
+    command: bin/pulsar standalone
+    environment:
+      PULSAR_MEM: "-Xms2g -Xmx2g -XX:MaxDirectMemorySize=2g"
+    volumes:
+      - pulsar_data:/pulsar/data
+      - pulsar_conf:/pulsar/conf
+      - ./config/pulsar/standalone.conf:/pulsar/conf/standalone.conf
+    ports:
+      - "6650:6650"   # Pulsar binary protocol
+      - "8080:8080"   # Pulsar HTTP service
+    networks:
+      - trade_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/admin/v2/clusters"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '1.0'
+          memory: 2G
+
+  # =============================================================================
+  # MONITORING INFRASTRUCTURE
+  # =============================================================================
+  
+  # Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: trade_prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./config/prometheus/rules:/etc/prometheus/rules
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - trade_network
+    depends_on:
+      - node-exporter
+      - cadvisor
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+
+  # Grafana
+  grafana:
+    image: grafana/grafana:latest
+    container_name: trade_grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
+      GF_INSTALL_PLUGINS: grafana-clock-panel,grafana-simple-json-datasource
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards
+    ports:
+      - "3000:3000"
+    networks:
+      - trade_network
+    depends_on:
+      - prometheus
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
+
+  # Node Exporter
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: trade_node_exporter
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    ports:
+      - "9100:9100"
+    networks:
+      - trade_network
+
+  # cAdvisor
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: trade_cadvisor
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    ports:
+      - "8081:8080"
+    networks:
+      - trade_network
+
+  # =============================================================================
+  # LOGGING INFRASTRUCTURE
+  # =============================================================================
+  
+  # Elasticsearch
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: trade_elasticsearch
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+      - xpack.security.enabled=false
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    networks:
+      - trade_network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+
+  # Logstash
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.11.0
+    container_name: trade_logstash
+    volumes:
+      - ./config/logstash/pipeline:/usr/share/logstash/pipeline
+      - ./config/logstash/logstash.yml:/usr/share/logstash/config/logstash.yml
+    ports:
+      - "5044:5044"
+    networks:
+      - trade_network
+    depends_on:
+      - elasticsearch
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+
+  # Kibana
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    container_name: trade_kibana
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    networks:
+      - trade_network
+    depends_on:
+      - elasticsearch
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
+
+  # =============================================================================
+  # APPLICATION SERVICES
+  # =============================================================================
+  
+  # Discovery Cluster
+  discovery-cluster:
+    build:
+      context: .
+      dockerfile: Dockerfile.discovery
+    container_name: trade_discovery_cluster
+    environment:
+      DATABASE_URL: postgresql+asyncpg://trading_user:${POSTGRES_PASSWORD}@postgres-primary:5432/trading
+      PULSAR_URL: pulsar://pulsar:6650
+      REDIS_URL: redis://redis:6379
+      CLUSTER_NAME: discovery
+      LOG_LEVEL: INFO
+      ENABLE_METRICS: "true"
+      METRICS_PORT: 8000
+    volumes:
+      - ./app:/app
+      - ./config:/config
+    ports:
+      - "8000:8000"  # API port
+      - "8001:8001"  # Metrics port
+    networks:
+      - trade_network
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+      pulsar:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 3G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+
+  # Execution Cluster
+  execution-cluster:
+    build:
+      context: .
+      dockerfile: Dockerfile.execution
+    container_name: trade_execution_cluster
+    environment:
+      DATABASE_URL: postgresql+asyncpg://trading_user:${POSTGRES_PASSWORD}@postgres-primary:5432/trading
+      PULSAR_URL: pulsar://pulsar:6650
+      REDIS_URL: redis://redis:6379
+      CLUSTER_NAME: execution
+      LOG_LEVEL: INFO
+      ENABLE_METRICS: "true"
+      METRICS_PORT: 8000
+    volumes:
+      - ./app:/app
+      - ./config:/config
+    ports:
+      - "8002:8000"  # API port
+      - "8003:8001"  # Metrics port
+    networks:
+      - trade_network
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+      pulsar:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 3G
+
+  # Risk Management Cluster
+  risk-cluster:
+    build:
+      context: .
+      dockerfile: Dockerfile.risk
+    container_name: trade_risk_cluster
+    environment:
+      DATABASE_URL: postgresql+asyncpg://trading_user:${POSTGRES_PASSWORD}@postgres-primary:5432/trading
+      PULSAR_URL: pulsar://pulsar:6650
+      REDIS_URL: redis://redis:6379
+      CLUSTER_NAME: risk
+      LOG_LEVEL: INFO
+      ENABLE_METRICS: "true"
+      METRICS_PORT: 8000
+    volumes:
+      - ./app:/app
+      - ./config:/config
+    ports:
+      - "8004:8000"  # API port
+      - "8005:8001"  # Metrics port
+    networks:
+      - trade_network
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+      pulsar:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+
+  # =============================================================================
+  # LOAD BALANCER & REVERSE PROXY
+  # =============================================================================
+  
+  # NGINX Load Balancer
+  nginx:
+    image: nginx:alpine
+    container_name: trade_nginx
+    volumes:
+      - ./config/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./config/nginx/ssl:/etc/nginx/ssl
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - trade_network
+    depends_on:
+      - discovery-cluster
+      - execution-cluster
+      - risk-cluster
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+# =============================================================================
+# NETWORKS
+# =============================================================================
+networks:
+  trade_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# =============================================================================
+# VOLUMES
+# =============================================================================
+volumes:
+  postgres_primary_data:
+    driver: local
+  redis_data:
+    driver: local
+  pulsar_data:
+    driver: local
+  pulsar_conf:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  elasticsearch_data:
+    driver: local 

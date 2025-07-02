@@ -1,0 +1,219 @@
+groups:
+  - name: agent_cost_alerts
+    interval: 30s
+    rules:
+      - alert: AgentCostWarningThreshold
+        expr: trading_agent_cost_per_1000_cycles_inr > 0.08
+        for: 2m
+        labels:
+          severity: warning
+          component: cost_management
+          kpi: cost_per_1000_cycles
+        annotations:
+          summary: "Agent {{ $labels.agent_name }} approaching cost threshold"
+          description: "Agent {{ $labels.agent_name }} cost per 1000 cycles is ₹{{ $value | printf \"%.4f\" }}, which exceeds the warning threshold of ₹0.08."
+          impact: "Approaching the ₹0.10 per 1000 cycles KPI limit"
+          action: "Review agent efficiency and consider cost optimization"
+          runbook_url: "https://docs.company.com/runbooks/agent-cost-optimization"
+
+      - alert: AgentCostCriticalThreshold  
+        expr: trading_agent_cost_per_1000_cycles_inr > 0.10
+        for: 1m
+        labels:
+          severity: critical
+          component: cost_management
+          kpi: cost_per_1000_cycles
+        annotations:
+          summary: "Agent {{ $labels.agent_name }} EXCEEDED cost KPI limit"
+          description: "Agent {{ $labels.agent_name }} cost per 1000 cycles is ₹{{ $value | printf \"%.4f\" }}, which EXCEEDS the critical ₹0.10 KPI limit."
+          impact: "KPI violation - immediate action required"
+          action: "Immediately disable expensive operations and review agent configuration"
+          runbook_url: "https://docs.company.com/runbooks/agent-cost-emergency"
+
+      - alert: HighDailyCostBudget
+        expr: trading_daily_budget_utilization_percent > 80
+        for: 5m
+        labels:
+          severity: warning  
+          component: cost_management
+          budget_type: daily
+        annotations:
+          summary: "High daily budget utilization for agent {{ $labels.agent_name }}"
+          description: "Agent {{ $labels.agent_name }} has used {{ $value | printf \"%.1f\" }}% of daily budget."
+          impact: "May exceed daily cost limits"
+          action: "Monitor closely and consider throttling agent operations"
+          runbook_url: "https://docs.company.com/runbooks/budget-management"
+
+      - alert: ExceededDailyCostBudget
+        expr: trading_daily_budget_utilization_percent > 100
+        for: 1m
+        labels:
+          severity: critical
+          component: cost_management
+          budget_type: daily
+        annotations:
+          summary: "Daily budget EXCEEDED for agent {{ $labels.agent_name }}"
+          description: "Agent {{ $labels.agent_name }} has exceeded daily budget at {{ $value | printf \"%.1f\" }}% utilization."
+          impact: "Daily budget violation - cost controls activated"
+          action: "Immediately throttle or disable agent operations"
+          runbook_url: "https://docs.company.com/runbooks/budget-exceeded"
+
+      - alert: HighCostVariation
+        expr: |
+          (
+            max(trading_agent_cost_per_1000_cycles_inr) by (agent_name) - 
+            min(trading_agent_cost_per_1000_cycles_inr) by (agent_name)
+          ) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+          component: cost_management
+          anomaly_type: cost_variation
+        annotations:
+          summary: "High cost variation detected for agent {{ $labels.agent_name }}"
+          description: "Agent {{ $labels.agent_name }} shows cost variation > ₹0.05 per 1000 cycles."
+          impact: "Inconsistent cost patterns may indicate efficiency issues"
+          action: "Investigate cost variations and optimize agent performance"
+          runbook_url: "https://docs.company.com/runbooks/cost-analysis"
+
+      - alert: LowCostEfficiency
+        expr: trading_agent_cost_efficiency_score < 10000
+        for: 15m
+        labels:
+          severity: warning
+          component: cost_management
+          efficiency_type: low_efficiency
+        annotations:
+          summary: "Low cost efficiency for agent {{ $labels.agent_name }}"
+          description: "Agent {{ $labels.agent_name }} efficiency score is {{ $value | printf \"%.0f\" }}, indicating poor cost-performance ratio."
+          impact: "Suboptimal resource utilization"
+          action: "Review agent logic and optimize computational efficiency"
+          runbook_url: "https://docs.company.com/runbooks/efficiency-optimization"
+
+      - alert: CostThresholdViolationRate
+        expr: rate(trading_cost_threshold_violations_total[5m]) > 0.1
+        for: 3m
+        labels:
+          severity: warning
+          component: cost_management
+          violation_type: frequent_violations
+        annotations:
+          summary: "Frequent cost threshold violations for agent {{ $labels.agent_name }}"
+          description: "Agent {{ $labels.agent_name }} is violating cost thresholds at a rate of {{ $value | printf \"%.2f\" }}/minute."
+          impact: "Pattern of cost violations indicates systematic issues"
+          action: "Investigate root cause of repeated violations"
+          runbook_url: "https://docs.company.com/runbooks/violation-patterns"
+
+  - name: cost_trend_alerts
+    interval: 1m
+    rules:
+      - alert: RisingCostTrend
+        expr: |
+          (
+            avg_over_time(trading_agent_cost_per_1000_cycles_inr[10m]) - 
+            avg_over_time(trading_agent_cost_per_1000_cycles_inr[10m] offset 30m)
+          ) > 0.02
+        for: 15m
+        labels:
+          severity: warning
+          component: cost_management
+          trend_type: rising_cost
+        annotations:
+          summary: "Rising cost trend detected for agent {{ $labels.agent_name }}"
+          description: "Agent {{ $labels.agent_name }} shows rising cost trend of ₹{{ $value | printf \"%.4f\" }} increase over 30 minutes."
+          impact: "Cost escalation may lead to budget overruns"
+          action: "Investigate cause of cost increases and implement controls"
+          runbook_url: "https://docs.company.com/runbooks/cost-trends"
+
+      - alert: SuddenCostSpike
+        expr: |
+          (
+            trading_agent_cost_per_1000_cycles_inr - 
+            avg_over_time(trading_agent_cost_per_1000_cycles_inr[5m] offset 5m)
+          ) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+          component: cost_management
+          anomaly_type: cost_spike
+        annotations:
+          summary: "Sudden cost spike for agent {{ $labels.agent_name }}"
+          description: "Agent {{ $labels.agent_name }} cost spiked to ₹{{ $value | printf \"%.4f\" }} per 1000 cycles."
+          impact: "Unexpected cost increase may indicate system issues"
+          action: "Immediate investigation required - check for resource leaks or inefficient operations"
+          runbook_url: "https://docs.company.com/runbooks/cost-spikes"
+
+  - name: cost_kpi_monitoring
+    interval: 5m  
+    rules:
+      - alert: KPIComplianceViolation
+        expr: |
+          (
+            sum(rate(trading_agent_cycles_total[1h])) by (agent_name) > 0 and
+            avg(trading_agent_cost_per_1000_cycles_inr) by (agent_name) > 0.10
+          )
+        for: 10m
+        labels:
+          severity: critical
+          component: cost_management
+          compliance: kpi_violation
+        annotations:
+          summary: "KPI compliance violation: Agent {{ $labels.agent_name }} exceeds ₹0.10/1000 cycles"
+          description: "Agent {{ $labels.agent_name }} is consistently violating the ₹0.10 per 1000 cycles KPI."
+          impact: "Key Performance Indicator violation - business objectives at risk"
+          action: "Escalate to management and implement immediate cost controls"
+          runbook_url: "https://docs.company.com/runbooks/kpi-compliance"
+
+      - alert: MultipleAgentKPIViolation
+        expr: |
+          count(
+            avg(trading_agent_cost_per_1000_cycles_inr) by (agent_name) > 0.10
+          ) >= 3
+        for: 5m
+        labels:
+          severity: critical
+          component: cost_management
+          system_wide: true
+        annotations:
+          summary: "System-wide KPI violation: Multiple agents exceeding cost limits"
+          description: "{{ $value }} agents are exceeding the ₹0.10 per 1000 cycles KPI limit."
+          impact: "System-wide cost management failure"
+          action: "Emergency response required - review entire agent infrastructure"
+          runbook_url: "https://docs.company.com/runbooks/system-cost-emergency"
+
+      - alert: CostMetricsUnavailable
+        expr: |
+          absent(trading_agent_cost_per_1000_cycles_inr) or 
+          absent(trading_agent_cycles_total)
+        for: 5m
+        labels:
+          severity: warning
+          component: cost_management
+          monitoring: metrics_missing
+        annotations:
+          summary: "Cost metrics unavailable"
+          description: "Agent cost metrics have not been collected for 5 minutes."
+          impact: "Cannot monitor cost KPIs - blind to cost violations"
+          action: "Check cost tracking service and metric collection"
+          runbook_url: "https://docs.company.com/runbooks/metrics-collection"
+
+  - name: cost_optimization_recommendations
+    interval: 1h
+    rules:
+      - alert: CostOptimizationOpportunity
+        expr: |
+          (
+            trading_agent_cost_per_1000_cycles_inr > 0.06 and
+            trading_agent_cost_efficiency_score < 15000
+          )
+        for: 1h
+        labels:
+          severity: info
+          component: cost_management
+          optimization: opportunity
+        annotations:
+          summary: "Cost optimization opportunity for agent {{ $labels.agent_name }}"
+          description: "Agent {{ $labels.agent_name }} has cost ₹{{ $value | printf \"%.4f\" }}/1000 cycles with efficiency room for improvement."
+          impact: "Potential cost savings available"
+          action: "Review optimization recommendations and implement efficiency improvements"
+          runbook_url: "https://docs.company.com/runbooks/cost-optimization-guide" 

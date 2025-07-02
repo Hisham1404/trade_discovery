@@ -1,0 +1,171 @@
+groups:
+  - name: security_alerts
+    interval: 30s
+    rules:
+      - alert: HighAuthenticationFailures
+        expr: rate(authentication_failures_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          component: security
+          security_type: authentication
+        annotations:
+          summary: "High authentication failure rate"
+          description: "Authentication failure rate is {{ $value | humanizePercentage }} from {{ $labels.source_ip }}"
+          impact: "Potential brute force attack or credential issues"
+          action: "Review authentication logs and consider IP blocking"
+          runbook_url: "https://docs.company.com/runbooks/auth-failures"
+
+      - alert: CriticalAuthenticationFailures
+        expr: rate(authentication_failures_total[5m]) > 0.5
+        for: 1m
+        labels:
+          severity: critical
+          component: security
+          security_type: authentication
+        annotations:
+          summary: "Critical authentication failure rate"
+          description: "Authentication failure rate is {{ $value | humanizePercentage }} - possible attack in progress"
+          impact: "Security breach attempt detected"
+          action: "Immediately block source IP and escalate to security team"
+          runbook_url: "https://docs.company.com/runbooks/security-breach"
+
+      - alert: UnauthorizedAccess
+        expr: rate(unauthorized_access_attempts_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          component: security
+          security_type: authorization
+        annotations:
+          summary: "Unauthorized access attempts detected"
+          description: "{{ $value }} unauthorized access attempts from {{ $labels.user_id }} to {{ $labels.resource }}"
+          impact: "Potential privilege escalation or data breach attempt"
+          action: "Investigate user activity and review access permissions"
+          runbook_url: "https://docs.company.com/runbooks/unauthorized-access"
+
+      - alert: SuspiciousAPIActivity
+        expr: rate(api_requests_total{status_code=~"4[0-9][0-9]"}[5m]) > 10
+        for: 3m
+        labels:
+          severity: warning
+          component: security
+          security_type: api_abuse
+        annotations:
+          summary: "Suspicious API activity detected"
+          description: "High rate of {{ $labels.status_code }} responses: {{ $value }} requests/second from {{ $labels.client_ip }}"
+          impact: "Potential API abuse or scanning activity"
+          action: "Review API access patterns and consider rate limiting"
+          runbook_url: "https://docs.company.com/runbooks/api-abuse"
+
+      - alert: FailedTokenValidation
+        expr: rate(token_validation_failures_total[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+          component: security
+          security_type: token_validation
+        annotations:
+          summary: "High token validation failure rate"
+          description: "Token validation failure rate is {{ $value | humanizePercentage }}"
+          impact: "Potential token manipulation or expired tokens"
+          action: "Check token generation and validation logic"
+          runbook_url: "https://docs.company.com/runbooks/token-validation"
+
+      - alert: SecurityConfigurationDrift
+        expr: security_config_checksum != on() security_baseline_checksum
+        for: 5m
+        labels:
+          severity: critical
+          component: security
+          security_type: configuration
+        annotations:
+          summary: "Security configuration drift detected"
+          description: "Security configuration has changed from baseline for {{ $labels.component }}"
+          impact: "Unauthorized security changes may weaken system security"
+          action: "Review security configuration changes and restore baseline if unauthorized"
+          runbook_url: "https://docs.company.com/runbooks/config-drift"
+
+      - alert: ExcessivePrivilegedAccess
+        expr: rate(privileged_operations_total[10m]) > 5
+        for: 3m
+        labels:
+          severity: warning
+          component: security
+          security_type: privilege_escalation
+        annotations:
+          summary: "Excessive privileged operations"
+          description: "{{ $value }} privileged operations per minute by {{ $labels.user_id }}"
+          impact: "Unusual privileged activity may indicate compromised account"
+          action: "Review user activity and validate privileged operations"
+          runbook_url: "https://docs.company.com/runbooks/privileged-access"
+
+      - alert: DataExfiltrationAttempt
+        expr: rate(data_export_bytes_total[5m]) > 100000000  # 100MB/minute
+        for: 2m
+        labels:
+          severity: critical
+          component: security
+          security_type: data_exfiltration
+        annotations:
+          summary: "Potential data exfiltration detected"
+          description: "High data export rate: {{ $value | humanizeBytes }}/minute by {{ $labels.user_id }}"
+          impact: "Potential data breach in progress"
+          action: "Immediately investigate and possibly suspend user account"
+          runbook_url: "https://docs.company.com/runbooks/data-exfiltration"
+
+      - alert: SecurityServiceDown
+        expr: up{job=~"security.*"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: security
+          security_type: service_availability
+        annotations:
+          summary: "Security service is down"
+          description: "Security service {{ $labels.job }} on {{ $labels.instance }} is not responding"
+          impact: "Security monitoring and protection may be compromised"
+          action: "Immediately restart security service and investigate cause"
+          runbook_url: "https://docs.company.com/runbooks/security-service-down"
+
+      - alert: AnomalousLoginPattern
+        expr: increase(login_events_total[1h]) > 50 and hour() >= 22 or hour() <= 6
+        for: 10m
+        labels:
+          severity: warning
+          component: security
+          security_type: behavioral_anomaly
+        annotations:
+          summary: "Anomalous login pattern detected"
+          description: "{{ $value }} logins detected during off-hours from {{ $labels.source_country }}"
+          impact: "Unusual access patterns may indicate compromised credentials"
+          action: "Review login events and verify user identity"
+          runbook_url: "https://docs.company.com/runbooks/anomalous-login"
+
+      - alert: CryptographicKeyRotationOverdue
+        expr: (time() - crypto_key_last_rotation_timestamp) > 2592000  # 30 days
+        for: 1h
+        labels:
+          severity: warning
+          component: security
+          security_type: key_management
+        annotations:
+          summary: "Cryptographic key rotation overdue"
+          description: "Key {{ $labels.key_id }} has not been rotated for {{ $value | humanizeDuration }}"
+          impact: "Overdue key rotation increases security risk"
+          action: "Schedule and perform key rotation according to security policy"
+          runbook_url: "https://docs.company.com/runbooks/key-rotation"
+
+      - alert: SecurityScanDetected
+        expr: rate(security_scan_indicators_total[5m]) > 0.1
+        for: 1m
+        labels:
+          severity: warning
+          component: security
+          security_type: scanning
+        annotations:
+          summary: "Security scanning activity detected"
+          description: "Security scan indicators from {{ $labels.source_ip }}: {{ $value }} events/second"
+          impact: "System is being scanned for vulnerabilities"
+          action: "Block scanning IP and review security posture"
+          runbook_url: "https://docs.company.com/runbooks/security-scanning" 

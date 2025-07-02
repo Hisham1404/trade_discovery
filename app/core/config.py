@@ -52,6 +52,17 @@ class Settings(BaseSettings):
     REDIS_PASSWORD: Optional[str] = Field(default=None, description="Redis password")
     REDIS_DB: int = Field(default=0, description="Redis database number")
     
+    # MinIO Settings (for immutable audit logging)
+    MINIO_ENDPOINT: str = Field(default="localhost:9000", description="MinIO server endpoint")
+    MINIO_ACCESS_KEY: str = Field(default="minioadmin", description="MinIO access key")
+    MINIO_SECRET_KEY: str = Field(default="minioadmin123", description="MinIO secret key")
+    MINIO_USE_SSL: bool = Field(default=False, description="Use SSL for MinIO connection")
+    AUDIT_HMAC_SECRET: str = Field(
+        default="audit-hmac-secret-key-at-least-32-characters-long",
+        description="Secret key for audit log HMAC verification",
+        min_length=32
+    )
+    
     # Testing
     TEST_DATABASE_URL: Optional[str] = Field(default=None, description="Override database URL specifically for tests")
     
@@ -77,4 +88,9 @@ class Settings(BaseSettings):
 
 
 # Global settings instance
-settings = Settings() 
+settings = Settings()
+
+# Function to get settings for dependency injection
+def get_settings() -> Settings:
+    """Get application settings."""
+    return settings 

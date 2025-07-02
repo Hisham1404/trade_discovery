@@ -1,0 +1,129 @@
+groups:
+  - name: data_quality_alerts
+    interval: 30s
+    rules:
+      - alert: MissingMarketData
+        expr: absent(market_data_last_update_timestamp) or (time() - market_data_last_update_timestamp) > 300
+        for: 2m
+        labels:
+          severity: critical
+          component: data_quality
+          data_type: market_data
+        annotations:
+          summary: "Market data is missing or stale"
+          description: "Market data has not been updated for more than 5 minutes. Last update: {{ $value }}s ago."
+          impact: "Trading signals may be based on stale data"
+          action: "Check market data ingestion pipeline and data sources"
+          runbook_url: "https://docs.company.com/runbooks/missing-market-data"
+
+      - alert: DataValidationFailures
+        expr: rate(data_validation_failures_total[5m]) > 0.05
+        for: 3m
+        labels:
+          severity: warning
+          component: data_quality
+          validation_type: general
+        annotations:
+          summary: "High data validation failure rate"
+          description: "Data validation failure rate is {{ $value | humanizePercentage }} over the last 5 minutes."
+          impact: "Data quality issues may affect trading decisions"
+          action: "Review data validation logs and check data sources"
+          runbook_url: "https://docs.company.com/runbooks/data-validation-failures"
+
+      - alert: CriticalDataValidationFailures
+        expr: rate(data_validation_failures_total[5m]) > 0.20
+        for: 1m
+        labels:
+          severity: critical
+          component: data_quality
+          validation_type: critical
+        annotations:
+          summary: "Critical data validation failure rate"
+          description: "Data validation failure rate is {{ $value | humanizePercentage }} - exceeding critical threshold."
+          impact: "Severe data quality issues - trading should be halted"
+          action: "Immediately investigate data pipeline and consider stopping trading"
+          runbook_url: "https://docs.company.com/runbooks/critical-data-failures"
+
+      - alert: MissingPriceData
+        expr: absent(stock_price_last_update{symbol=~"RELIANCE|TCS|INFY|HCLTECH|WIPRO"})
+        for: 1m
+        labels:
+          severity: critical
+          component: data_quality
+          data_type: price_data
+        annotations:
+          summary: "Missing price data for major stocks"
+          description: "Price data missing for major stock {{ $labels.symbol }}"
+          impact: "Cannot generate trading signals for major stocks"
+          action: "Check price data feed and market data providers"
+          runbook_url: "https://docs.company.com/runbooks/missing-price-data"
+
+      - alert: HighDataLatency
+        expr: histogram_quantile(0.95, rate(data_ingestion_latency_seconds_bucket[5m])) > 5.0
+        for: 3m
+        labels:
+          severity: warning
+          component: data_quality
+          latency_type: ingestion
+        annotations:
+          summary: "High data ingestion latency"
+          description: "P95 data ingestion latency is {{ $value }}s, exceeding 5-second threshold."
+          impact: "Delayed data may affect trading signal timing"
+          action: "Check data ingestion pipeline performance"
+          runbook_url: "https://docs.company.com/runbooks/data-latency"
+
+      - alert: DataSchemaViolations
+        expr: rate(data_schema_violations_total[5m]) > 0.01
+        for: 2m
+        labels:
+          severity: warning
+          component: data_quality
+          violation_type: schema
+        annotations:
+          summary: "Data schema violations detected"
+          description: "Schema violation rate is {{ $value | humanizePercentage }} for data source {{ $labels.source }}"
+          impact: "Malformed data may cause processing errors"
+          action: "Check data source format and validation rules"
+          runbook_url: "https://docs.company.com/runbooks/schema-violations"
+
+      - alert: DataGaps
+        expr: increase(data_gap_detected_total[10m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          component: data_quality
+          gap_type: temporal
+        annotations:
+          summary: "Data gaps detected"
+          description: "{{ $value }} data gaps detected in the last 10 minutes for {{ $labels.data_stream }}"
+          impact: "Missing data periods may affect analysis accuracy"
+          action: "Investigate data source connectivity and backfill missing data"
+          runbook_url: "https://docs.company.com/runbooks/data-gaps"
+
+      - alert: DuplicateDataRecords
+        expr: rate(duplicate_data_records_total[5m]) > 0.02
+        for: 5m
+        labels:
+          severity: warning
+          component: data_quality
+          duplicate_type: records
+        annotations:
+          summary: "High duplicate data record rate"
+          description: "Duplicate record rate is {{ $value | humanizePercentage }} for stream {{ $labels.stream }}"
+          impact: "Duplicate data may skew analysis and trading signals"
+          action: "Check data deduplication logic and upstream sources"
+          runbook_url: "https://docs.company.com/runbooks/duplicate-data"
+
+      - alert: DataFreshnessViolation
+        expr: (time() - data_freshness_timestamp) > 120
+        for: 2m
+        labels:
+          severity: warning
+          component: data_quality
+          freshness_type: real_time
+        annotations:
+          summary: "Data freshness violation"
+          description: "Data for {{ $labels.symbol }} is {{ $value }}s old, exceeding 2-minute freshness requirement"
+          impact: "Stale data may lead to suboptimal trading decisions"
+          action: "Check real-time data feed and processing pipeline"
+          runbook_url: "https://docs.company.com/runbooks/data-freshness" 

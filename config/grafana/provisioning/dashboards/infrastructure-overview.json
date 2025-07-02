@@ -1,357 +1,488 @@
 {
-  "annotations": {
-    "list": [
+  "dashboard": {
+    "id": null,
+    "uid": "infrastructure-overview",
+    "title": "Trading Signal Infrastructure Overview",
+    "tags": ["trading", "agents", "pulsar", "monitoring"],
+    "style": "dark",
+    "timezone": "Asia/Kolkata",
+    "refresh": "30s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "templating": {
+      "list": [
+        {
+          "name": "agent_type",
+          "type": "query",
+          "datasource": "Prometheus",
+          "query": "label_values(agent_signals_generated_total, agent_type)",
+          "refresh": 1,
+          "multi": true,
+          "includeAll": true,
+          "allValue": ".*"
+        },
+        {
+          "name": "instance",
+          "type": "query", 
+          "datasource": "Prometheus",
+          "query": "label_values(up, instance)",
+          "refresh": 1,
+          "multi": true,
+          "includeAll": true,
+          "allValue": ".*"
+        }
+      ]
+    },
+    "panels": [
       {
-        "builtIn": 1,
-        "datasource": "-- Grafana --",
-        "enable": true,
-        "hide": true,
-        "iconColor": "rgba(0, 211, 255, 1)",
-        "name": "Annotations & Alerts",
-        "type": "dashboard"
+        "id": 1,
+        "title": "System Overview",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+        "collapsed": false
+      },
+      {
+        "id": 2,
+        "title": "Service Uptime",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 1},
+        "targets": [
+          {
+            "expr": "up{job=~\"pulsar|agent.*\"} * 100",
+            "legendFormat": "{{instance}} - {{job}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 80},
+                {"color": "green", "value": 99}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "CPU Usage",
+        "type": "graph",
+        "gridPos": {"h": 4, "w": 6, "x": 6, "y": 1},
+        "targets": [
+          {
+            "expr": "100 - (avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\",instance=~\"$instance\"}[5m])) * 100)",
+            "legendFormat": "{{instance}}",
+            "refId": "A"
+          }
+        ],
+        "yAxes": [
+          {"unit": "percent", "min": 0, "max": 100}
+        ],
+        "thresholds": [
+          {"value": 80, "colorMode": "critical", "op": "gt"}
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Memory Usage",
+        "type": "graph",
+        "gridPos": {"h": 4, "w": 6, "x": 12, "y": 1},
+        "targets": [
+          {
+            "expr": "(1 - (node_memory_MemAvailable_bytes{instance=~\"$instance\"} / node_memory_MemTotal_bytes{instance=~\"$instance\"})) * 100",
+            "legendFormat": "{{instance}}",
+            "refId": "A"
+          }
+        ],
+        "yAxes": [
+          {"unit": "percent", "min": 0, "max": 100}
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Network I/O",
+        "type": "graph",
+        "gridPos": {"h": 4, "w": 6, "x": 18, "y": 1},
+        "targets": [
+          {
+            "expr": "rate(node_network_receive_bytes_total{instance=~\"$instance\"}[5m])",
+            "legendFormat": "{{instance}} - RX",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(node_network_transmit_bytes_total{instance=~\"$instance\"}[5m])",
+            "legendFormat": "{{instance}} - TX",
+            "refId": "B"
+          }
+        ],
+        "yAxes": [
+          {"unit": "bytes", "min": 0}
+        ]
+      },
+      {
+        "id": 6,
+        "title": "Agent Performance",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 5},
+        "collapsed": false
+      },
+      {
+        "id": 7,
+        "title": "Agent Execution Time",
+        "type": "graph",
+        "gridPos": {"h": 6, "w": 12, "x": 0, "y": 6},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(agent_execution_duration_seconds_bucket{agent_type=~\"$agent_type\"}[5m]))",
+            "legendFormat": "{{agent_type}} - P95",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate(agent_execution_duration_seconds_bucket{agent_type=~\"$agent_type\"}[5m]))",
+            "legendFormat": "{{agent_type}} - P50",
+            "refId": "B"
+          }
+        ],
+        "yAxes": [
+          {"unit": "s", "min": 0}
+        ],
+        "thresholds": [
+          {"value": 0.060, "colorMode": "critical", "op": "gt"}
+        ]
+      },
+      {
+        "id": 8,
+        "title": "Signal Count by Agent",
+        "type": "graph",
+        "gridPos": {"h": 6, "w": 12, "x": 12, "y": 6},
+        "targets": [
+          {
+            "expr": "rate(agent_signals_generated_total{agent_type=~\"$agent_type\"}[5m])",
+            "legendFormat": "{{agent_type}}",
+            "refId": "A"
+          }
+        ],
+        "yAxes": [
+          {"unit": "short", "min": 0}
+        ]
+      },
+      {
+        "id": 9,
+        "title": "Success Rate by Agent",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 8, "x": 0, "y": 12},
+        "targets": [
+          {
+            "expr": "(rate(agent_signals_generated_total{agent_type=~\"$agent_type\"}[5m]) / (rate(agent_signals_generated_total{agent_type=~\"$agent_type\"}[5m]) + rate(agent_errors_total{agent_type=~\"$agent_type\"}[5m]))) * 100",
+            "legendFormat": "{{agent_type}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 90},
+                {"color": "green", "value": 95}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 10,
+        "title": "Agent Error Rate",
+        "type": "graph",
+        "gridPos": {"h": 4, "w": 8, "x": 8, "y": 12},
+        "targets": [
+          {
+            "expr": "rate(agent_errors_total{agent_type=~\"$agent_type\"}[5m])",
+            "legendFormat": "{{agent_type}}",
+            "refId": "A"
+          }
+        ],
+        "yAxes": [
+          {"unit": "short", "min": 0}
+        ],
+        "thresholds": [
+          {"value": 0.1, "colorMode": "critical", "op": "gt"}
+        ]
+      },
+      {
+        "id": 11,
+        "title": "Active Agents",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 8, "x": 16, "y": 12},
+        "targets": [
+          {
+            "expr": "count(up{job=~\"agent.*\"} == 1)",
+            "legendFormat": "Active Agents",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "min": 0,
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 4},
+                {"color": "green", "value": 7}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 12,
+        "title": "Pulsar Messaging",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 16},
+        "collapsed": false
+      },
+      {
+        "id": 13,
+        "title": "Message Throughput",
+        "type": "graph",
+        "gridPos": {"h": 6, "w": 12, "x": 0, "y": 17},
+        "targets": [
+          {
+            "expr": "pulsar_msg_rate_in",
+            "legendFormat": "Messages In - {{topic}}",
+            "refId": "A"
+          },
+          {
+            "expr": "pulsar_msg_rate_out",
+            "legendFormat": "Messages Out - {{topic}}",
+            "refId": "B"
+          }
+        ],
+        "yAxes": [
+          {"unit": "short", "min": 0}
+        ]
+      },
+      {
+        "id": 14,
+        "title": "Message Latency",
+        "type": "graph",
+        "gridPos": {"h": 6, "w": 12, "x": 12, "y": 17},
+        "targets": [
+          {
+            "expr": "pulsar_storage_write_latency",
+            "legendFormat": "Write Latency - {{topic}}",
+            "refId": "A"
+          },
+          {
+            "expr": "pulsar_consumer_msg_ack_latency",
+            "legendFormat": "Ack Latency - {{topic}}",
+            "refId": "B"
+          }
+        ],
+        "yAxes": [
+          {"unit": "s", "min": 0}
+        ],
+        "thresholds": [
+          {"value": 0.05, "colorMode": "critical", "op": "gt"}
+        ]
+      },
+      {
+        "id": 15,
+        "title": "Topic Storage Size",
+        "type": "graph",
+        "gridPos": {"h": 4, "w": 8, "x": 0, "y": 23},
+        "targets": [
+          {
+            "expr": "pulsar_storage_size",
+            "legendFormat": "{{topic}}",
+            "refId": "A"
+          }
+        ],
+        "yAxes": [
+          {"unit": "bytes", "min": 0}
+        ]
+      },
+      {
+        "id": 16,
+        "title": "Consumer Lag",
+        "type": "graph",
+        "gridPos": {"h": 4, "w": 8, "x": 8, "y": 23},
+        "targets": [
+          {
+            "expr": "pulsar_consumer_lag",
+            "legendFormat": "{{subscription}} - {{topic}}",
+            "refId": "A"
+          }
+        ],
+        "yAxes": [
+          {"unit": "short", "min": 0}
+        ],
+        "thresholds": [
+          {"value": 1000, "colorMode": "critical", "op": "gt"}
+        ]
+      },
+      {
+        "id": 17,
+        "title": "Pulsar Broker Status",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 8, "x": 16, "y": 23},
+        "targets": [
+          {
+            "expr": "up{job=\"pulsar\"}",
+            "legendFormat": "Pulsar Broker",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "mappings": [
+              {"type": "value", "value": "0", "text": "DOWN"},
+              {"type": "value", "value": "1", "text": "UP"}
+            ],
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "green", "value": 1}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 18,
+        "title": "Infrastructure Health",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 27},
+        "collapsed": false
+      },
+      {
+        "id": 19,
+        "title": "Database Connections",
+        "type": "graph",
+        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 28},
+        "targets": [
+          {
+            "expr": "pg_stat_database_numbackends",
+            "legendFormat": "{{datname}}",
+            "refId": "A"
+          }
+        ],
+        "yAxes": [
+          {"unit": "short", "min": 0}
+        ]
+      },
+      {
+        "id": 20,
+        "title": "Redis Memory Usage",
+        "type": "graph",
+        "gridPos": {"h": 4, "w": 6, "x": 6, "y": 28},
+        "targets": [
+          {
+            "expr": "redis_memory_used_bytes / redis_memory_max_bytes * 100",
+            "legendFormat": "Memory Usage %",
+            "refId": "A"
+          }
+        ],
+        "yAxes": [
+          {"unit": "percent", "min": 0, "max": 100}
+        ]
+      },
+      {
+        "id": 21,
+        "title": "ElasticSearch Cluster Health",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 12, "y": 28},
+        "targets": [
+          {
+            "expr": "elasticsearch_cluster_health_status",
+            "legendFormat": "ES Health",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {"type": "value", "value": "0", "text": "RED"},
+              {"type": "value", "value": "1", "text": "YELLOW"},
+              {"type": "value", "value": "2", "text": "GREEN"}
+            ],
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 1},
+                {"color": "green", "value": 2}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 22,
+        "title": "Jaeger Traces/sec",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 18, "y": 28},
+        "targets": [
+          {
+            "expr": "rate(jaeger_collector_traces_total[5m])",
+            "legendFormat": "Traces/sec",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "min": 0
+          }
+        }
       }
-    ]
-  },
-  "editable": true,
-  "gnetId": null,
-  "graphTooltip": 0,
-  "id": null,
-  "links": [],
-  "panels": [
-    {
-      "datasource": "Prometheus",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "vis": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "percent"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 0
-      },
-      "id": 1,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "single"
-        }
-      },
-      "targets": [
+    ],
+    "annotations": {
+      "list": [
         {
-          "expr": "up * 100",
-          "interval": "",
-          "legendFormat": "{{instance}} - {{job}}",
-          "refId": "A"
+          "name": "Deployments",
+          "datasource": "Prometheus",
+          "enable": true,
+          "expr": "resets(up[1h]) > 0",
+          "iconColor": "rgba(255, 96, 96, 1)",
+          "step": "60s",
+          "titleFormat": "Service Restart",
+          "textFormat": "{{instance}} - {{job}}"
         }
-      ],
-      "title": "Service Availability",
-      "type": "timeseries"
-    },
-    {
-      "datasource": "Prometheus",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 1
-              },
-              {
-                "color": "green",
-                "value": 1
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 0
-      },
-      "id": 2,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "values": false,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        },
-        "textMode": "auto"
-      },
-      "pluginVersion": "8.0.0",
-      "targets": [
-        {
-          "expr": "sum(up)",
-          "interval": "",
-          "legendFormat": "Services Up",
-          "refId": "A"
-        }
-      ],
-      "title": "Total Services Up",
-      "type": "stat"
-    },
-    {
-      "datasource": "PostgreSQL",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "vis": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 8
-      },
-      "id": 3,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "single"
-        }
-      },
-      "targets": [
-        {
-          "format": "time_series",
-          "group": [],
-          "metricColumn": "none",
-          "rawQuery": true,
-          "rawSql": "SELECT\n  $__time(timestamp),\n  count(*) as signals\nFROM trading.signals\nWHERE $__timeFilter(timestamp)\nGROUP BY $__timeGroup(timestamp,'5m')\nORDER BY 1",
-          "refId": "A",
-          "select": [
-            [
-              {
-                "params": [
-                  "value"
-                ],
-                "type": "column"
-              }
-            ]
-          ],
-          "timeColumn": "time",
-          "where": [
-            {
-              "name": "$__timeFilter",
-              "params": [],
-              "type": "macro"
-            }
-          ]
-        }
-      ],
-      "title": "Trading Signals Generated",
-      "type": "timeseries"
-    },
-    {
-      "datasource": "PostgreSQL",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "vis": false
-            }
-          },
-          "mappings": []
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 8
-      },
-      "id": 4,
-      "options": {
-        "legend": {
-          "displayMode": "visible",
-          "placement": "bottom"
-        },
-        "pieType": "pie",
-        "reduceOptions": {
-          "values": false,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        },
-        "tooltip": {
-          "mode": "single"
-        }
-      },
-      "targets": [
-        {
-          "format": "table",
-          "group": [],
-          "metricColumn": "none",
-          "rawQuery": true,
-          "rawSql": "SELECT\n  signal_type,\n  count(*) as count\nFROM trading.signals\nWHERE $__timeFilter(timestamp)\nGROUP BY signal_type",
-          "refId": "A",
-          "select": [
-            [
-              {
-                "params": [
-                  "value"
-                ],
-                "type": "column"
-              }
-            ]
-          ],
-          "timeColumn": "time",
-          "where": [
-            {
-              "name": "$__timeFilter",
-              "params": [],
-              "type": "macro"
-            }
-          ]
-        }
-      ],
-      "title": "Signal Distribution",
-      "type": "piechart"
+      ]
     }
-  ],
-  "schemaVersion": 27,
-  "style": "dark",
-  "tags": [
-    "discovery-cluster",
-    "infrastructure"
-  ],
-  "templating": {
-    "list": []
   },
-  "time": {
-    "from": "now-6h",
-    "to": "now"
-  },
-  "timepicker": {},
-  "timezone": "",
-  "title": "Discovery Cluster - Infrastructure Overview",
-  "uid": "discovery-infrastructure",
-  "version": 1
+  "meta": {
+    "type": "db",
+    "canSave": true,
+    "canEdit": true,
+    "canAdmin": true,
+    "canStar": true,
+    "slug": "infrastructure-overview",
+    "url": "/d/infrastructure-overview/trading-signal-infrastructure-overview",
+    "expires": "0001-01-01T00:00:00Z",
+    "created": "2024-01-01T00:00:00Z",
+    "updated": "2024-01-01T00:00:00Z",
+    "updatedBy": "admin",
+    "createdBy": "admin",
+    "version": 1,
+    "hasAcl": false,
+    "isFolder": false,
+    "folderId": 0,
+    "folderTitle": "Discovery Cluster",
+    "folderUrl": "",
+    "provisioned": true,
+    "provisionedExternalId": "infrastructure-overview.json"
+  }
 } 

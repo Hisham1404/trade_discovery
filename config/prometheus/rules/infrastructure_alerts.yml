@@ -1,212 +1,301 @@
 groups:
-  - name: infrastructure_alerts
+  - name: agent_alerts
+    interval: 30s
     rules:
-      # Service availability alerts
-      - alert: ServiceDown
-        expr: up == 0
-        for: 1m
+      - alert: AgentDown
+        expr: up{job=~"agent.*"} == 0
+        for: 5m
         labels:
           severity: critical
+          component: agent
         annotations:
-          summary: "Service {{ $labels.instance }} is down"
-          description: "Service {{ $labels.instance }} has been down for more than 1 minute."
+          summary: "Trading Agent {{ $labels.instance }} is down"
+          description: "Agent {{ $labels.instance }} of type {{ $labels.job }} has been down for more than 5 minutes."
+          runbook_url: "https://docs.company.com/runbooks/agent-down"
 
-      # PostgreSQL alerts
-      - alert: PostgreSQLDown
-        expr: pg_up == 0
-        for: 30s
-        labels:
-          severity: critical
-        annotations:
-          summary: "PostgreSQL is down"
-          description: "PostgreSQL database is not responding."
-
-      - alert: PostgreSQLTooManyConnections
-        expr: sum by (instance) (pg_stat_activity_count) > 80
+      - alert: AgentHighExecutionTime
+        expr: histogram_quantile(0.95, rate(agent_execution_duration_seconds_bucket[5m])) > 0.060
         for: 2m
         labels:
           severity: warning
+          component: agent
         annotations:
-          summary: "PostgreSQL has too many connections"
-          description: "PostgreSQL instance {{ $labels.instance }} has {{ $value }} connections (> 80)."
+          summary: "High execution time for agent {{ $labels.agent_type }}"
+          description: "Agent {{ $labels.agent_type }} P95 execution time is {{ $value }}s, which exceeds the 60ms SLA."
+          runbook_url: "https://docs.company.com/runbooks/agent-performance"
 
-      - alert: PostgreSQLHighCPU
-        expr: rate(pg_stat_bgwriter_checkpoint_write_time[5m]) > 0.05
+      - alert: MissingSignals
+        expr: increase(agent_signals_generated_total[5m]) == 0
         for: 5m
         labels:
           severity: warning
+          component: agent
         annotations:
-          summary: "PostgreSQL high CPU usage"
-          description: "PostgreSQL is experiencing high CPU usage."
+          summary: "No signals received from agent {{ $labels.agent_type }}"
+          description: "Agent {{ $labels.agent_type }} has not generated any signals for 5 minutes."
+          runbook_url: "https://docs.company.com/runbooks/missing-signals"
 
-      # Redis alerts
-      - alert: RedisDown
-        expr: redis_up == 0
-        for: 30s
+      - alert: AgentHighErrorRate
+        expr: rate(agent_errors_total[5m]) > 0.1
+        for: 3m
+        labels:
+          severity: warning
+          component: agent
+        annotations:
+          summary: "High error rate for agent {{ $labels.agent_type }}"
+          description: "Agent {{ $labels.agent_type }} error rate is {{ $value | humanizePercentage }} which is above the 10% threshold."
+          runbook_url: "https://docs.company.com/runbooks/agent-errors"
+
+      - alert: AgentLowSuccessRate
+        expr: (rate(agent_signals_generated_total[5m]) / (rate(agent_signals_generated_total[5m]) + rate(agent_errors_total[5m]))) * 100 < 90
+        for: 5m
         labels:
           severity: critical
+          component: agent
         annotations:
-          summary: "Redis is down"
-          description: "Redis instance is not responding."
+          summary: "Low success rate for agent {{ $labels.agent_type }}"
+          description: "Agent {{ $labels.agent_type }} success rate is {{ $value | humanizePercentage }} which is below the 90% threshold."
+          runbook_url: "https://docs.company.com/runbooks/agent-success-rate"
 
-      - alert: RedisHighMemoryUsage
-        expr: redis_memory_used_bytes / redis_memory_max_bytes * 100 > 90
-        for: 2m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Redis high memory usage"
-          description: "Redis instance is using {{ $value }}% of its memory."
-
-      - alert: RedisHighConnections
-        expr: redis_connected_clients > 100
-        for: 2m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Redis has too many connections"
-          description: "Redis instance has {{ $value }} connections (> 100)."
-
-      # Pulsar alerts
-      - alert: PulsarDown
+  - name: pulsar_alerts
+    interval: 30s
+    rules:
+      - alert: PulsarBrokerDown
         expr: up{job="pulsar"} == 0
         for: 1m
         labels:
           severity: critical
+          component: pulsar
         annotations:
-          summary: "Apache Pulsar is down"
-          description: "Pulsar service is not responding."
+          summary: "Pulsar broker is down"
+          description: "Pulsar broker {{ $labels.instance }} is not reachable for more than 1 minute."
+          runbook_url: "https://docs.company.com/runbooks/pulsar-broker-down"
 
-      - alert: PulsarHighMessageBacklog
-        expr: pulsar_subscription_back_log > 1000
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Pulsar high message backlog"
-          description: "Pulsar subscription has {{ $value }} messages in backlog."
-
-      # Elasticsearch alerts
-      - alert: ElasticsearchDown
-        expr: elasticsearch_cluster_health_up != 1
-        for: 30s
-        labels:
-          severity: critical
-        annotations:
-          summary: "Elasticsearch is down"
-          description: "Elasticsearch cluster is not healthy."
-
-      - alert: ElasticsearchDiskSpaceHigh
-        expr: elasticsearch_filesystem_data_available_bytes / elasticsearch_filesystem_data_size_bytes * 100 < 10
+      - alert: HighMessageLatency
+        expr: pulsar_storage_write_latency > 0.05
         for: 2m
         labels:
           severity: warning
+          component: pulsar
         annotations:
-          summary: "Elasticsearch low disk space"
-          description: "Elasticsearch node has only {{ $value }}% disk space available."
+          summary: "High message latency detected"
+          description: "Message write latency is {{ $value }}s for topic {{ $labels.topic }}, which is above the 50ms threshold."
+          runbook_url: "https://docs.company.com/runbooks/high-latency"
 
-      # Qdrant alerts
-      - alert: QdrantDown
-        expr: up{job="qdrant"} == 0
-        for: 1m
-        labels:
-          severity: critical
-        annotations:
-          summary: "Qdrant vector database is down"
-          description: "Qdrant service is not responding."
-
-      # MinIO alerts
-      - alert: MinIODown
-        expr: up{job="minio"} == 0
-        for: 1m
-        labels:
-          severity: critical
-        annotations:
-          summary: "MinIO object storage is down"
-          description: "MinIO service is not responding."
-
-      - alert: MinIOHighDiskUsage
-        expr: minio_cluster_disk_total_bytes - minio_cluster_disk_free_bytes > minio_cluster_disk_total_bytes * 0.9
+      - alert: HighConsumerLag
+        expr: pulsar_consumer_lag > 1000
         for: 5m
         labels:
           severity: warning
+          component: pulsar
         annotations:
-          summary: "MinIO high disk usage"
-          description: "MinIO cluster is using more than 90% of disk space."
+          summary: "High consumer lag detected"
+          description: "Consumer lag for subscription {{ $labels.subscription }} on topic {{ $labels.topic }} is {{ $value }} messages."
+          runbook_url: "https://docs.company.com/runbooks/consumer-lag"
 
-      # System resource alerts
-      - alert: HighMemoryUsage
-        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 90
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "High memory usage"
-          description: "Memory usage is above 90% on {{ $labels.instance }}."
-
-      - alert: HighDiskUsage
-        expr: (1 - node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 > 85
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "High disk usage"
-          description: "Disk usage is above 85% on {{ $labels.instance }}."
-
-      # Container alerts
-      - alert: ContainerKilled
-        expr: time() - container_last_seen > 60
-        for: 0m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Container killed"
-          description: "A container has disappeared for more than 1 minute."
-
-      - alert: ContainerCpuUsage
-        expr: (sum(rate(container_cpu_usage_seconds_total[3m])) BY (instance, name) * 100) > 80
-        for: 2m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Container CPU usage"
-          description: "Container CPU usage is above 80% for {{ $labels.name }}."
-
-      - alert: ContainerMemoryUsage
-        expr: (sum(container_memory_working_set_bytes) BY (instance, name) / sum(container_spec_memory_limit_bytes > 0) BY (instance, name) * 100) > 80
-        for: 2m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Container Memory usage"
-          description: "Container Memory usage is above 80% for {{ $labels.name }}."
-
-  - name: trading_specific_alerts
-    rules:
-      # Trading signal alerts (for future implementation)
-      - alert: LowSignalGeneration
-        expr: rate(trading_signals_generated_total[5m]) < 0.1
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Low signal generation rate"
-          description: "Signal generation rate is below 0.1 signals/second for 5 minutes."
-
-      - alert: HighSignalErrorRate
-        expr: rate(trading_signal_errors_total[5m]) / rate(trading_signals_generated_total[5m]) > 0.1
-        for: 2m
-        labels:
-          severity: warning
-        annotations:
-          summary: "High signal error rate"
-          description: "Signal error rate is above 10% for 2 minutes."
-
-      - alert: AgentPerformanceDegraded
-        expr: avg_over_time(agent_accuracy_ratio[1h]) < 0.6
+      - alert: LowMessageThroughput
+        expr: rate(pulsar_msg_rate_in[5m]) < 0.1
         for: 10m
         labels:
           severity: warning
+          component: pulsar
         annotations:
-          summary: "Agent performance degraded"
-          description: "Agent {{ $labels.agent_id }} accuracy is below 60% for the last hour." 
+          summary: "Low message throughput"
+          description: "Message ingestion rate for topic {{ $labels.topic }} is {{ $value }} msg/s, which is below expected levels."
+          runbook_url: "https://docs.company.com/runbooks/low-throughput"
+
+      - alert: HighStorageUsage
+        expr: (pulsar_storage_size / pulsar_storage_limit) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          component: pulsar
+        annotations:
+          summary: "High storage usage detected"
+          description: "Topic {{ $labels.topic }} storage usage is {{ $value | humanizePercentage }} of limit."
+          runbook_url: "https://docs.company.com/runbooks/storage-usage"
+
+      - alert: PulsarMetricsUnavailable
+        expr: absent(pulsar_msg_rate_in)
+        for: 3m
+        labels:
+          severity: warning
+          component: pulsar
+        annotations:
+          summary: "Pulsar metrics unavailable"
+          description: "Pulsar metrics have not been scraped for 3 minutes."
+          runbook_url: "https://docs.company.com/runbooks/metrics-unavailable"
+
+  - name: infrastructure_alerts
+    interval: 30s
+    rules:
+      - alert: HighCPUUsage
+        expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+          component: infrastructure
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is {{ $value | humanizePercentage }} on instance {{ $labels.instance }}."
+          runbook_url: "https://docs.company.com/runbooks/high-cpu"
+
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          component: infrastructure
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: "Memory usage is {{ $value | humanizePercentage }} on instance {{ $labels.instance }}."
+          runbook_url: "https://docs.company.com/runbooks/high-memory"
+
+      - alert: LowDiskSpace
+        expr: (1 - (node_filesystem_avail_bytes / node_filesystem_size_bytes)) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          component: infrastructure
+        annotations:
+          summary: "Low disk space on {{ $labels.instance }}"
+          description: "Disk usage is {{ $value | humanizePercentage }} on {{ $labels.mountpoint }} of instance {{ $labels.instance }}."
+          runbook_url: "https://docs.company.com/runbooks/low-disk"
+
+      - alert: PostgreSQLDown
+        expr: up{job="postgres"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: database
+        annotations:
+          summary: "PostgreSQL is down"
+          description: "PostgreSQL database is not accessible."
+          runbook_url: "https://docs.company.com/runbooks/postgres-down"
+
+      - alert: RedisDown
+        expr: up{job="redis"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: cache
+        annotations:
+          summary: "Redis is down"
+          description: "Redis cache is not accessible."
+          runbook_url: "https://docs.company.com/runbooks/redis-down"
+
+      - alert: HighDatabaseConnections
+        expr: pg_stat_database_numbackends > 80
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "High database connections"
+          description: "Database {{ $labels.datname }} has {{ $value }} connections, which is approaching the limit."
+          runbook_url: "https://docs.company.com/runbooks/high-db-connections"
+
+      - alert: RedisHighMemoryUsage
+        expr: (redis_memory_used_bytes / redis_memory_max_bytes) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          component: cache
+        annotations:
+          summary: "Redis high memory usage"
+          description: "Redis memory usage is {{ $value | humanizePercentage }} of available memory."
+          runbook_url: "https://docs.company.com/runbooks/redis-memory"
+
+  - name: monitoring_alerts
+    interval: 30s
+    rules:
+      - alert: PrometheusTargetDown
+        expr: up == 0
+        for: 3m
+        labels:
+          severity: warning
+          component: monitoring
+        annotations:
+          summary: "Prometheus target {{ $labels.instance }} is down"
+          description: "Prometheus target {{ $labels.instance }} for job {{ $labels.job }} has been down for more than 3 minutes."
+          runbook_url: "https://docs.company.com/runbooks/target-down"
+
+      - alert: GrafanaDown
+        expr: up{job="grafana"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: monitoring
+        annotations:
+          summary: "Grafana is down"
+          description: "Grafana monitoring dashboard is not accessible."
+          runbook_url: "https://docs.company.com/runbooks/grafana-down"
+
+      - alert: PrometheusTSDBCompactionsFailing
+        expr: increase(prometheus_tsdb_compactions_failed_total[3h]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          component: monitoring
+        annotations:
+          summary: "Prometheus TSDB compactions failing"
+          description: "Prometheus has {{ $value }} failed compactions in the last 3 hours."
+          runbook_url: "https://docs.company.com/runbooks/tsdb-compaction"
+
+      - alert: PrometheusConfigReloadFailing
+        expr: prometheus_config_last_reload_successful != 1
+        for: 5m
+        labels:
+          severity: warning
+          component: monitoring
+        annotations:
+          summary: "Prometheus configuration reload failing"
+          description: "Prometheus configuration reload has been failing for 5 minutes."
+          runbook_url: "https://docs.company.com/runbooks/config-reload"
+
+  - name: business_logic_alerts
+    interval: 30s
+    rules:
+      - alert: LowTradingVolume
+        expr: rate(agent_signals_generated_total[10m]) < 0.01
+        for: 10m
+        labels:
+          severity: warning
+          component: business
+        annotations:
+          summary: "Low trading signal volume"
+          description: "Trading signal generation rate is {{ $value }} signals/sec, which is below expected levels."
+          runbook_url: "https://docs.company.com/runbooks/low-volume"
+
+      - alert: HighSignalLatency
+        expr: histogram_quantile(0.95, rate(signal_processing_duration_seconds_bucket[5m])) > 1.0
+        for: 3m
+        labels:
+          severity: warning
+          component: business
+        annotations:
+          summary: "High signal processing latency"
+          description: "Signal processing P95 latency is {{ $value }}s, which exceeds the 1s threshold."
+          runbook_url: "https://docs.company.com/runbooks/signal-latency"
+
+      - alert: AbnormalPriceMovement
+        expr: abs(rate(market_price_change_total[1m])) > 0.05
+        for: 1m
+        labels:
+          severity: info
+          component: business
+        annotations:
+          summary: "Abnormal price movement detected"
+          description: "Market price for {{ $labels.symbol }} changed by {{ $value | humanizePercentage }} in 1 minute."
+          runbook_url: "https://docs.company.com/runbooks/price-movement"
+
+      - alert: StaleMarketData
+        expr: time() - market_data_last_update_timestamp > 300
+        for: 0m
+        labels:
+          severity: critical
+          component: business
+        annotations:
+          summary: "Stale market data detected"
+          description: "Market data for {{ $labels.symbol }} is {{ $value }} seconds old."
+          runbook_url: "https://docs.company.com/runbooks/stale-data" 

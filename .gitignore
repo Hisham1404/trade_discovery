@@ -153,3 +153,138 @@ alembic/versions/*.pyc
 .env.exampl
 .gitignore.bak
 tests/
+
+# Production environment files
+.env.production*
+.env.staging*
+.env.development*
+
+# SSL/TLS Certificates and Keys
+*.crt
+*.key
+*.pem
+*.p12
+*.pfx
+ssl/
+certs/
+certificates/
+
+# API Keys and Secrets
+secrets.json
+config/secrets/
+.secrets/
+
+# Database credentials
+database.conf
+db_credentials.*
+
+
+# Prometheus data
+prometheus_data/
+prometheus/data/
+grafana_data/
+grafana/data/
+
+# Alertmanager data
+alertmanager_data/
+alertmanager/data/
+
+# OpenTelemetry collector data
+otel_data/
+
+# Log files (specific patterns)
+*.log.*
+logs/*.log
+monitoring/logs/
+
+# Docker volumes and data
+docker_data/
+volumes/
+postgres_data/
+redis_data/
+pulsar_data/
+qdrant_data/
+
+# Docker build context excludes
+.dockerignore
+docker-compose.production.yml.local
+docker-compose.local.yml
+
+
+# MLflow tracking
+mlruns/
+mlflow_data/
+experiments/
+
+# Model artifacts
+models/checkpoints/
+*.model
+*.weights
+*.ckpt
+model_registry/
+
+# Training data and outputs
+training_data/
+model_outputs/
+feature_store/
+
+
+# Market data cache
+market_data_cache/
+historical_data/
+real_time_feeds/
+
+# Trading signals and backtesting
+signals_cache/
+backtest_results/
+portfolio_data/
+
+# Agent memory and state
+agent_memory/
+agent_state/
+.agent_cache/
+
+
+# Database files and dumps
+*.sql.backup
+*.dump
+database_backups/
+db_dumps/
+
+# TimescaleDB specific
+timescaledb_data/
+
+# Alembic temporary files
+alembic/env.pyc
+alembic.ini.local
+
+
+
+# Terraform state (if using)
+*.tfstate
+*.tfstate.backup
+.terraform/
+
+# Kubernetes local configs
+kubeconfig.local
+k8s-local/
+
+# Deployment artifacts
+deployment/local/
+.deploy/
+
+
+# Test outputs and reports
+test_reports/
+coverage_reports/
+test_results/
+performance_tests/
+
+# Jupyter notebook outputs
+.ipynb_checkpoints/
+*.ipynb
+
+# Development utilities
+.dev/
+dev_scripts/
+local_tools/
